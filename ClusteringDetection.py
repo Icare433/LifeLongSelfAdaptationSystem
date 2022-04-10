@@ -1,4 +1,7 @@
+from sklearn.cluster import AgglomerativeClustering
+from sklearn.decomposition import PCA
 from sklearn.mixture import GaussianMixture as GMM
+from sklearn import metrics
 import numpy as np
 import matplotlib.pyplot as plt
 
@@ -13,48 +16,46 @@ def sel_best( arr, X) -> list:
 
 class ClusterDetection:
 
-    def check_analysis(self, experiences):
-        data = dict()
-        for experience in experiences:
-            current_datapoint = list()
-            mote = experience.mote
-            if mote not in data.keys():
-                data[mote] = list()
+    def reduce_dimensionality(self):
+        return None
 
-            for transmission in experience.state:
-                for value in list(transmission.values()):
-                    current_datapoint.append(value)
-
-            current_datapoint.append(experience.action)
-
-            for transmission in experience.next_state:
-                for value in list(transmission.values()):
-                    current_datapoint.append(value)
-
-            data[mote].append()
-
-    def determine_cluster_amount(self,data):
-        n_clusters = np.arange(2, 20)
-        bics = []
-        bics_err = []
+    def determine_clustering(self, mote_array, data, reducer=PCA(0.99), clusterer = AgglomerativeClustering):
+        n_clusters = np.arange(2, 15)
+        best_sil = -20
+        best_model = None
+        sils = []
+        sils_err = []
         iterations = 20
+        data = reducer.fit_transform(data)
         for n in n_clusters:
-            tmp_bic = []
+            tmp_sil = []
             for _ in range(iterations):
-                gmm = GMM(n, n_init=2).fit(data)
+                try:
+                    labels = clusterer(n_clusters=n).fit_predict(data)
+                    sil = metrics.silhouette_score(data, labels, metric='euclidean')
+                    tmp_sil.append(sil)
+                    if sil > best_sil:
+                        best_sil = sil
+                        best_model = labels
+                except Exception:
+                    pass
+            val = np.mean(sel_best(np.array(tmp_sil), int(iterations / 5)))
+            err = np.std(tmp_sil)
+            sils.append(val)
+            sils_err.append(err)
+        clusters = dict()
+        for index in range(len(best_model)):
+            if clusters.get(best_model[index]) is None:
+                clusters[best_model[index]] = list()
+            clusters[best_model[index]].append(mote_array[index])
 
-                tmp_bic.append(gmm.bic(data))
-            val = np.mean(sel_best(np.array(tmp_bic), int(iterations / 5)))
-            err = np.std(tmp_bic)
-            bics.append(val)
-            bics_err.append(err)
-        np.gradient(bics)
+        return clusters
 
-        plt.errorbar(n_clusters, np.gradient(bics), yerr=bics_err, label='BIC')
-        plt.title("Gradient of BIC Scores", fontsize=20)
-        plt.xticks(n_clusters)
-        plt.xlabel("N. of clusters")
-        plt.ylabel("grad(BIC)")
-        plt.legend()
+
+
+
+
+
+
 
 

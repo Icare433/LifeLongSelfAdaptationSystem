@@ -1,6 +1,6 @@
-import paho.mqtt.client as mqtt
-import os
-os.add_dll_directory("C:/Program Files/NVIDIA GPU Computing Toolkit/CUDA/v11.5/bin")
+
+#import os
+#os.add_dll_directory("C:/Program Files/NVIDIA GPU Computing Toolkit/CUDA/v11.5/bin")
 
 import time
 import queue
@@ -62,9 +62,9 @@ def get_data(message):
     return data
 
 
-def create_lost_data(number,mote):
+def create_lost_data(number,transmission_interval):
         lost_data = dict()
-        lost_data["transmission_interval"] = -1000
+        lost_data["transmission_interval"] = transmission_interval
         lost_data["expiration_time"] = -1000
         lost_data["transmission_power_setting"] = -1000
         lost_data["transmission_number"] = number
@@ -74,9 +74,8 @@ def create_lost_data(number,mote):
         lost_data["receiver"] = -1000
         return lost_data
 
+
 class Knowledge:
-
-
 
     def __init__(self,goal_model,number_of_datapoints_per_state = 5, number_of_features = 8, number_of_actions = 15, knowledgeManager = None):
         self.number_of_datapoints_per_state = number_of_datapoints_per_state
@@ -87,50 +86,59 @@ class Knowledge:
         self.datapoints = dict()
         self.lastdatapoint = dict()
         self.knowledgeManager = knowledgeManager
+        self.expected_next_transmission = dict()
 
-
-
-    def add_data(self,mote_id,data):
+    def add_data(self, mote_id, data):
+        motes_for_analysis = []
+        self.expected_next_transmission[mote_id] = data.get("departure_time") + 300
+        for mote in self.expected_next_transmission:
+            if self.expected_next_transmission[mote] < data.get("departure_time"):
+                number = (self.lastdatapoint.get(mote).get("transmission_number") + 1) % 100
+                lost_data = create_lost_data(number, self.lastdatapoint[mote].get("transmission_interval"))
+                self.datapoints.get(mote).append(lost_data)
+                self.expected_next_transmission[mote] = data.get("departure_time") + 300
+                self.lastdatapoint[mote] = lost_data
+        #       motes_for_analysis.append(mote)
         if mote_id not in self.datapoints:
             self.datapoints[mote_id] = list()
             self.datapoints.get(mote_id).append(data)
-            self.lastdatapoint[mote_id] = data;
-            return False
-
-
+            self.lastdatapoint[mote_id] = data
+            return motes_for_analysis
         prev_data = self.lastdatapoint.get(mote_id)
         if prev_data.get("transmission_number") == data.get("transmission_number"):
             if prev_data.get("transmission_power") < data.get("transmission_power"):
                 self.datapoints.get(mote_id)[-1] = data
                 self.lastdatapoint[mote_id] = data
-                return False
+                return motes_for_analysis
 
-        elif (prev_data.get("transmission_number") + 1) %100 == data.get("transmission_number"):
-
+        elif (prev_data.get("transmission_number") + 1) % 100 == data.get("transmission_number"):
             self.datapoints.get(mote_id).append(data)
             self.lastdatapoint[mote_id] = data
-            return True
+            motes_for_analysis.append(mote_id)
+            return motes_for_analysis
 
         elif data.get("transmission_number") > prev_data.get("transmission_number"):
-            for number in range(prev_data.get("transmission_number"),data.get("transmission_number")):
-                self.datapoints.get(mote_id).append(create_lost_data(number,mote_id))
+            for number in range(prev_data.get("transmission_number"), data.get("transmission_number")):
+                self.datapoints.get(mote_id).append(create_lost_data(number, prev_data.get("transmission_interval")))
             self.datapoints.get(mote_id).append(data)
             self.lastdatapoint[mote_id] = data
-            return True
-
+            motes_for_analysis.append(mote_id)
+            return motes_for_analysis
 
         elif prev_data.get("transmission_number") - data.get("transmission_number")-10 > 0:
-            datapoint_complete = True
-            for number in range(prev_data.get("transmission_number"),100):
-                self.datapoints.get(mote_id).append(create_lost_data(number,mote_id))
 
-            for number in range(0,data.get("transmission_number")):
-                self.datapoints.get(mote_id).append(create_lost_data(number,mote_id))
+            for number in range(prev_data.get("transmission_number"), 100):
+                self.datapoints.get(mote_id).append(create_lost_data(number, prev_data.get("transmission_interval")))
+
+            for number in range(0, data.get("transmission_number")):
+                self.datapoints.get(mote_id).append(create_lost_data(number, prev_data.get("transmission_interval")))
 
             self.datapoints.get(mote_id).append(data)
             self.lastdatapoint[mote_id] = data
-            return True
+            motes_for_analysis.append(mote_id)
+            return motes_for_analysis
 
+        return motes_for_analysis
 
     def get_last_state_vector(self,mote_id):
         return list(self.datapoints.get(mote_id))[-self.number_of_datapoints_per_state:]
@@ -138,8 +146,8 @@ class Knowledge:
     def getKnowledgeManager(self):
         return self.knowledgeManager
 
-    def addKnowledgeManager(self,knowledgeManager):
-        self.knowledgeManager =knowledgeManager
+    def addKnowledgeManager(self, knowledgeManager):
+        self.knowledgeManager = knowledgeManager
 
 class Analyser:
 
@@ -148,8 +156,7 @@ class Analyser:
         self.decision_making = decision_making
         self.new_datapoint_counter = dict()
 
-    def analyse_new_datapoint(self,mote):
-        #If we get first datapoint for a mote, prepare a counter
+    def analyse_new_datapoint(self, mote):
         if self.new_datapoint_counter.get(mote) is None:
             self.new_datapoint_counter[mote] = 0
         # A new datapoint for a mote is available
@@ -163,7 +170,7 @@ class Analyser:
             for transmission in state:
                 for value in list(transmission.values()):
                     state_vector.append(value)
-            state_vector = np.array(state_vector,dtype=np.float64)
+            state_vector = np.array(state_vector, dtype=np.float64)
             reward = self.knowledge.goal_model.evaluate(state)
             if self.knowledge.getKnowledgeManager() is not None:
                 self.knowledge.getKnowledgeManager().observe_state(mote,state,reward)
@@ -183,23 +190,30 @@ class DecisionMaking:
             self.agents.append(Q_learner_model.Agent(self.knowledge.number_of_datapoints_per_state * self.knowledge.number_of_features, self.knowledge.number_of_actions))
             self.agents[n].handle_episode_start()
 
-
-    def determine_action(self,mote,state,objective_function):
-        observation = Observation(state,objective_function)
-        cluster = cluster_of_mote(mote)
-        action = self.agents[cluster].step(mote,observation)
+    def determine_action(self, mote, state, objective_function):
+        observation = Observation(state, objective_function)
+        cluster = self.cluster_of_mote(mote)
+        action = self.agents[cluster].step(mote, observation)
+        if self.knowledge.getKnowledgeManager() is not None:
+            self.knowledge.getKnowledgeManager().observe_action(mote , action)
         self.planner.plan(mote, action)
 
-    def push_new_model(self,model,memory):
-        self.agent.learning_model = model
-        self.agent.memory = memory
-        self.agent.steps =(1.0/self.agent.anneal_rate)/2
+    def push_new_model(self, clusters, models, memories):
+        self.agents = list()
+        index = 0
+        while index < len(models):
+            self.agents.append(Q_learner_model.Agent(self.knowledge.number_of_datapoints_per_state * self.knowledge.number_of_features, self.knowledge.number_of_actions))
+            self.agents[len(self.agents)-1].learning_model = models[index]
+            self.agents[len(self.agents) - 1].memory = memories[index]
+            self.agents[len(self.agents)-1].handle_episode_start()
+            for mote in clusters[index]:
+                self.clustering[mote] = index
+            index += 1
+
 
     def cluster_of_mote(self, mote):
-        return self.clustering.get(mote,0)
+        return self.clustering.get(mote, 0)
 
-    def switch_mote_cluster(self,mote,cluster):
-        self.clustering[mote] = cluster
 
 
 
@@ -215,21 +229,21 @@ class Monitor:
                 message = self.queue.get_nowait()
             except queue.Empty:
                 return
-            should_analyse = False
             if message is None:
                 return
 
+            should_analyse = []
             try:
                 mote = int(message.topic.split("/")[1])
                 should_analyse = self.knowledge.add_data(mote, get_data(str(message.payload.decode("utf-8"))))
-
             except AttributeError:
                 return
 
             except ValueError:
                 return
-            if should_analyse:
-                self.analyser.analyse_new_datapoint(mote)
+            if len(should_analyse) > 0:
+                for mote_id in should_analyse:
+                    self.analyser.analyse_new_datapoint(mote_id)
 
 class Planner:
 
@@ -255,17 +269,21 @@ class Executor:
 
 class LatencyGoal:
 
-    def __init__(self,value):
+    def __init__(self, value):
         self.value = value
 
-    def evaluate(self,state):
+    def evaluate(self, state):
         satisfaction = 0
         counter= 0
         for transmission in state:
             if transmission.get("expiration_time") != -1000:
-                satisfaction+= max(0,(transmission.get("latency")*transmission.get("expiration_time")/100 - self.value))/(transmission.get("latency")*transmission.get("expiration_time")/100+1)
+                satisfaction += 1 - max(0, (transmission.get("latency")*transmission.get("expiration_time")/100-self.value))\
+                               / (transmission.get("latency")*transmission.get("expiration_time")/100+1)
                 counter += 1
-        satisfaction = satisfaction / counter
+        if counter > 0:
+            satisfaction = satisfaction / counter
+        else:
+            satisfaction = 0
         return satisfaction
 
 

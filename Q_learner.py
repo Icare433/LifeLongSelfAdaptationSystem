@@ -106,8 +106,9 @@ class Memory(object):
 
         return [self.buffer[i] for i in index]
 
-    def getEntries(self):
-        return self.buffer
+    def size(self):
+        """get the size of the buffer."""
+        return len(self.buffer)
 
     def __len__(self):
         """Interface to access buffer length."""
@@ -174,12 +175,11 @@ class Agent(object):
                 }
 
                 self.memory.add(experience)
+            else:
+                self.steps -= 1
 
             if self.steps > self.replay_start_size:
                 self.train_network()
-
-
-
 
         self.last_states[mote] = state
         self.last_actions[mote] = action

@@ -1,0 +1,19 @@
+/figures/
+/results.txt
+/results_cluster_half_long.txt
+/results_cluster_long.txt
+/results_cluster_long_BIRCH.txt
+/results_cluster_long_PCA.txt
+/results_cluster_MDS_BIRCH_half.txt
+/results_cluster_MDS_BIRCH_long.txt
+/results_first.txt
+/results_first_cluster.txt
+/results_full_PCA_agglomerative.txt
+/results_half_for_paper_ BIRCH_PCA.txt
+/results_no_reclustering.txt
+/results_recluster_long_BIRCH.txt
+/results_second.txt
+/results_second_cluster.txt
+/results_third.txt
+/results_third_cluster.txt
+/results_trial_PCA_BIRCH.txt

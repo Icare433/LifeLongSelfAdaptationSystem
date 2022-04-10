@@ -1,6 +1,9 @@
 import math
 
 import numpy as np
+from sklearn.cluster import Birch
+from sklearn.manifold import MDS
+from sklearn.mixture import GaussianMixture
 
 import Q_learner
 
@@ -24,6 +27,9 @@ class TaskManager:
         new_model = self.learning_manager.retrain()
         self.learning_manager.update_learning_model(new_model, self.knowledge_manager.get_experiences())
 
+    def check_for_tasks(self):
+        self.knowledge_manager
+
 
 class TaskBasedKnowledgeMiner:
 
@@ -38,16 +44,16 @@ class TaskBasedKnowledgeMiner:
 
 class KnowledgeManager:
 
-    def __init__(self, learning_model, goal_model, cluster_detection, reclustering_interval = 10):
+    def __init__(self, learning_model, goal_model, reclustering_interval = 20, reclustering_delay = 30):
 
         self.experiences = list()
         self.learning_model = learning_model
         self.goal_model = goal_model
         self.last_experiences = dict()
-        self.data_per_mote =dict()
+        self.new_data_per_mote =dict()
         self.save_file = open("results.txt", "a")
-        self.cluster_detection = cluster_detection
         self.reclustering_interval = reclustering_interval
+        self.reclustering_delay = reclustering_delay
 
     def get_current_goals(self):
         return self.goal_model
@@ -61,46 +67,93 @@ class KnowledgeManager:
         experience = Experience(state, reward, mote)
         if self.last_experiences.get(mote) is not None:
             self.last_experiences.get(mote).add_next_state(experience.state, experience.reward)
-            self.data_per_mote[mote] = self.data_per_mote[mote] + 1
             self.experiences.append(self.last_experiences.get(mote))
         else:
-            self.data_per_mote[mote] = 0
+            self.new_data_per_mote[mote] = -self.reclustering_delay
+        self.new_data_per_mote[mote] = self.new_data_per_mote[mote] + 1
+
         self.last_experiences[mote] = experience
 
         recluster = False
-        for mote in self.data_per_mote:
-            if self.data_per_mote[mote] % self.reclustering_interval == 0:
+        for mote in self.new_data_per_mote:
+            if self.new_data_per_mote[mote] > self.reclustering_interval:
                 recluster = True
+
             else:
                 recluster = False
 
-        if recluster:
-            self.cluster_detection.check_analysis()
+        if recluster & (self.clusteringManager is not None):
+            self.clusteringManager.recluster()
 
     def observe_action(self, mote, action):
         if self.last_experiences.get(mote) is not None:
             self.last_experiences.get(mote).add_action(action)
 
-    def get_experiences(self):
+    def get_experiences(self, size, motes):
         memory = Q_learner.Memory(100000)
-        for experience in self.experiences:
-            state_vector = list()
-            for transmission in experience.state:
-                for value in list(transmission.values()):
-                    state_vector.append(value)
-            state_vector = np.array(state_vector, dtype=object)
-            next_state_vector = list()
-            for transmission in experience.next_state:
-                for value in list(transmission.values()):
-                    next_state_vector.append(value)
-            next_state_vector = np.array(state_vector, dtype=object)
-            memory.add({
+        index = len(self.experiences) - 1
+        while memory.size() < size & index >= 0:
+            experience = self.experiences[index]
+            index -= 1
+            if experience.mote in motes:
+                state_vector = list()
+                for transmission in experience.state:
+                    for value in list(transmission.values()):
+                        state_vector.append(value)
+                state_vector = np.array(state_vector, dtype=object)
+                next_state_vector = list()
+                for transmission in experience.next_state:
+                    for value in list(transmission.values()):
+                        next_state_vector.append(value)
+                next_state_vector = np.array(next_state_vector, dtype=object)
+                memory.add({
                     "state": state_vector,
                     "action": experience.action,
                     "reward": experience.reward,
                     "next_state": next_state_vector
-                })
+                    })
         return memory
+
+    def cluster_data(self):
+        data = dict()
+        datasize = 0
+        for mote in self.new_data_per_mote:
+            datasize += self.new_data_per_mote[mote]
+        for experience in self.experiences[-datasize:]:
+            if data.get(experience.mote) is None:
+                data[experience.mote] = list()
+            for transmission in experience.state:
+                for value in list(transmission.values()):
+                    data[experience.mote].append(value)
+
+            data[experience.mote].append(experience.action)
+
+            for transmission in experience.next_state:
+                for value in list(transmission.values()):
+                    data[experience.mote].append(value)
+        data_array = list()
+        minimal_data = self.reclustering_interval*self.reclustering_interval*15
+        for mote in data:
+            if minimal_data > len(data[mote]):
+                minimal_data = len(data[mote])
+
+        mote_array = list()
+        for mote in data:
+            mote_array.append(mote)
+            data_array.append(np.array(data[mote][-minimal_data:], dtype=object))
+        data_array = np.array(data_array)
+        for mote in self.new_data_per_mote:
+            self.new_data_per_mote[mote] = 0
+        p = np.random.permutation(len(mote_array))
+        randomized_mote_array = list()
+        randomized_data_array = list()
+        for index in p:
+            randomized_mote_array.append(mote_array[index])
+            randomized_data_array.append(data_array[index])
+        return [randomized_mote_array, randomized_data_array]
+
+    def addCLusteringManager(self, clustering_manager):
+        self.clusteringManager = clustering_manager
 
 
 class Experience:
@@ -126,11 +179,9 @@ class LearningManager:
         self.knowledge_manager = knowledge_manager
         self.decision_making_component = decision_making_component
 
-    def retrain(self, batch_size=32, discount=0.99):
-        current_model = self.knowledge_manager.get_current_model()
+    def retrain(self, current_model, experiences, batch_size=32, discount=0.99):
         new_model = Q_learner.Network(current_model.input_size, current_model.output_size)
 
-        experiences = self.knowledge_manager.get_experiences()
         for i in range(math.floor(len(experiences)/batch_size)):
             """Update online network weights."""
             batch = experiences.sample(batch_size)
@@ -146,8 +197,33 @@ class LearningManager:
             new_model.train_step(inputs, targets, actions_one_hot)
         return new_model
 
-    def update_learning_model(self, model,memory):
-        self.decision_making_component.push_new_model(model,memory)
+    def update_learning_model(self, clusters, models, memories):
+        self.decision_making_component.push_new_model(clusters, models, memories)
+
+
+class ClusteringManager:
+
+        def __init__(self, knowledgeManager, cluster_detection, LearningManager, time_window = 25000):
+            self.knowledgeManager = knowledgeManager
+            self.cluster_detection = cluster_detection
+            self.time_window = time_window
+            self.LearningManager = LearningManager
+
+        def recluster(self):
+            print("recluster")
+            [mote_array, data_for_clustering] = self.knowledgeManager.cluster_data()
+            clusters = self.cluster_detection.determine_clustering(mote_array, data_for_clustering, clusterer=Birch)
+
+            self.knowledgeManager.save_file.write("recluster: "+str(clusters)+"\n")
+            print(clusters)
+            models = list()
+            experiences = list()
+            for index in clusters:
+                experience = self.knowledgeManager.get_experiences(self.time_window, clusters[index])
+                model = self.knowledgeManager.get_current_model()
+                models.append(self.LearningManager.retrain(model, experience))
+                experiences.append(experience)
+            self.LearningManager.update_learning_model(clusters, models, experiences)
 
 
 
