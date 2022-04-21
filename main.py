@@ -1,3 +1,5 @@
+import socket
+
 import ClusteringDetection
 import selfAdaptiveSystem
 import paho.mqtt.client as mqtt
@@ -12,16 +14,18 @@ def on_message(client, userdata, message):
     q.put(message)
 
 
-client = mqtt.Client("life-long-learning-on-dingnet")
-client.connect("localhost", port=1883)
-client.subscribe("node/#")
+HOST = "localhost"
+PORT = 4032
+s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 
-client.on_message = on_message  # attach function to callback
+s.connect((HOST, PORT))
+
+
+
+
 
 
 def main():
-    client.loop_stop()
-    client.loop_start()
     latency_goal = selfAdaptiveSystem.LatencyGoal(15)
     packet_loss_goal = selfAdaptiveSystem.PacketlossGoal(0.1)
     energy_goal = selfAdaptiveSystem.EnergyconsumptionGoal()
@@ -36,13 +40,13 @@ def main():
     new_goal_model = selfAdaptiveSystem.ListGoalModel(new_goal_list, [0.4, 0.4, 0.2])
 
     knowledge = selfAdaptiveSystem.Knowledge(goal_model)
-    executor = selfAdaptiveSystem.Executor(client)
+    executor = selfAdaptiveSystem.Executor(s)
     planner = selfAdaptiveSystem.Planner(executor)
     decision_making = selfAdaptiveSystem.DecisionMaking(planner, knowledge, 1)
     knowledge_manager = KnowledgeManager(decision_making.agents[0].learning_model, goal_model)
     knowledge.addKnowledgeManager(knowledge_manager)
     analyser = selfAdaptiveSystem.Analyser(knowledge, decision_making)
-    monitor = selfAdaptiveSystem.Monitor(knowledge, analyser, q)
+    monitor = selfAdaptiveSystem.Monitor(knowledge, analyser, s)
     learning_manager = LearningManager(knowledge_manager, decision_making)
     task_based_knowledge_miner = TaskBasedKnowledgeMiner(knowledge_manager)
     task_manager = TaskManager(knowledge, knowledge_manager, learning_manager, task_based_knowledge_miner)

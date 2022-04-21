@@ -158,7 +158,8 @@ class Knowledge:
 
 class Analyser:
 
-    def __init__(self,knowledge, decision_making):
+    def __init__(self, knowledge, decision_making):
+        self.gateway = None
         self.knowledge = knowledge
         self.decision_making = decision_making
         self.new_datapoint_counter = dict()
@@ -175,6 +176,8 @@ class Analyser:
             state = self.knowledge.get_last_state_vector(mote)
             state_vector = list()
             for transmission in state:
+                if transmission.get("transmission_power_setting") != -1000:
+                    self.gateway = transmission.get("receiver")
                 for value in list(transmission.values()):
                     state_vector.append(value)
             state_vector = np.array(state_vector, dtype=np.float64)
@@ -182,7 +185,7 @@ class Analyser:
             if self.knowledge.getKnowledgeManager() is not None:
                 self.knowledge.getKnowledgeManager().observe_state(mote,state,reward)
 
-            self.decision_making.determine_action(mote,state_vector,reward)
+            self.decision_making.determine_action(self.gateway, mote, state_vector, reward)
 
 
 
@@ -197,14 +200,14 @@ class DecisionMaking:
             self.agents.append(Q_learner_model.Agent(self.knowledge.number_of_datapoints_per_state * self.knowledge.number_of_features, self.knowledge.number_of_actions))
             self.agents[n].handle_episode_start()
 
-    def determine_action(self, mote, state, objective_function):
+    def determine_action(self, gateway, mote, state, objective_function):
         print("making decision")
         observation = Observation(state, objective_function)
         cluster = self.cluster_of_mote(mote)
         action = self.agents[cluster].step(mote, observation)
         if self.knowledge.getKnowledgeManager() is not None:
             self.knowledge.getKnowledgeManager().observe_action(mote, action)
-        self.planner.plan(mote, action)
+        self.planner.plan(gateway, mote, action)
 
     def push_new_model(self, clusters, models, memories):
         self.agents = list()
@@ -233,17 +236,22 @@ class Monitor:
         self.queue = queue
 
     def monitor(self):
-            try:
-                message = self.queue.get_nowait()
-            except queue.Empty:
+
+            literal_message = self.queue.recv(4096).decode('utf-8')
+
+            if literal_message is None:
                 return
-            if message is None:
+            try:
+                message_topic = literal_message.split("|")[0]
+
+                message_payload = literal_message.split("|")[1]
+            except IndexError:
                 return
 
             should_analyse = []
             try:
-                mote = int(message.topic.split("/")[1])
-                should_analyse = self.knowledge.add_data(mote, get_data(str(message.payload.decode("utf-8"))))
+                mote = int(message_topic.split("/")[1])
+                should_analyse = self.knowledge.add_data(mote, get_data(str(message_payload)))
             except AttributeError:
                 return
 
@@ -258,22 +266,22 @@ class Planner:
     actionTable = {0:[0,0,0],1:[1,0,0],2:[0,5,0],3:[0,0,5],4:[1,5,0],5:[1,0,5],6:[0,5,5],7:[1,5,5],
                    8:[-1,-5,-5],9:[-1,0,0],10:[0,-5,0],11:[0,0,-5],12:[-1,-5,0],13:[-1,0,-5],14:[0,-5,-5]}
 
-    def __init__(self,executer):
+    def __init__(self, executer):
         self.executer = executer
 
-    def plan(self,mote,action_number):
+    def plan(self, gateway, mote, action_number):
         if action_number != 0:
             action = self.actionTable.get(action_number)
-            self.executer.execute_change(mote,action[0],action[1],action[2])
+            self.executer.execute_change(gateway, mote, action[0], action[1], action[2])
 
 class Executor:
 
     def __init__(self,mqtt_client):
         self.mqtt_client = mqtt_client
 
-    def execute_change(self,moteid,transmission_power,expiration_time,transmission_interval):
+    def execute_change(self, gatewayid, moteid, transmission_power, expiration_time, transmission_interval):
         print("made a choice")
-        self.mqtt_client.publish("node/"+str(moteid)+"/application/1/tx",'{"data":['+str(transmission_power)+','+str(expiration_time)+','+str(transmission_interval)+'],"macCommands":[]}')
+        self.mqtt_client.send(("node/"+str(moteid)+"/application/1/tx"+"|"+'{"data":['+str(transmission_power)+','+str(expiration_time)+','+str(transmission_interval)+'],"macCommands":[]}'+"\n").encode("utf-8"))
 
 
 class LatencyGoal:
