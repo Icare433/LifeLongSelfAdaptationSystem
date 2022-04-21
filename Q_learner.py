@@ -194,6 +194,7 @@ class Agent(object):
         if training and explore:
             action = np.random.randint(self.action_space_size)
         else:
+            print("made a choice")
             inputs = np.array(state, dtype=np.float64)
             inputs = np.expand_dims(inputs, 0)
 

@@ -77,7 +77,7 @@ def create_lost_data(number,transmission_interval):
 
 class Knowledge:
 
-    def __init__(self,goal_model,number_of_datapoints_per_state = 7, number_of_features = 8, number_of_actions = 15, knowledgeManager = None):
+    def __init__(self,goal_model,number_of_datapoints_per_state = 5, number_of_features = 8, number_of_actions = 15, knowledgeManager = None):
         self.number_of_datapoints_per_state = number_of_datapoints_per_state
         self.number_of_features = number_of_features
         self.number_of_actions = number_of_actions
@@ -85,28 +85,23 @@ class Knowledge:
         self.motes = dict()
         self.datapoints = dict()
         self.lastdatapoint = dict()
-        self.lastdatainterval = dict()
         self.knowledgeManager = knowledgeManager
         self.expected_next_transmission = dict()
 
     def add_data(self, mote_id, data):
         motes_for_analysis = []
-        if mote_id in self.lastdatapoint:
-            self.expected_next_transmission[mote_id] = data.get("departure_time") + max((
-                    self.lastdatainterval.get(mote_id,300) + 5), (self.lastdatapoint[mote_id].get("transmission_interval") + 5) * 2)
+        self.expected_next_transmission[mote_id] = data.get("departure_time") + 300
         for mote in self.expected_next_transmission:
             if self.expected_next_transmission[mote] < data.get("departure_time"):
                 number = (self.lastdatapoint.get(mote).get("transmission_number") + 1) % 100
                 lost_data = create_lost_data(number, self.lastdatapoint[mote].get("transmission_interval"))
                 self.datapoints.get(mote).append(lost_data)
-                self.expected_next_transmission[mote] = data.get("departure_time") + max((
-                    self.lastdatainterval.get(mote,300) + 5), (self.lastdatapoint[mote].get("transmission_interval") +5) * 2)
+                self.expected_next_transmission[mote] = data.get("departure_time") + 300
                 self.lastdatapoint[mote] = lost_data
-                motes_for_analysis.append(mote)
+        #       motes_for_analysis.append(mote)
         if mote_id not in self.datapoints:
             self.datapoints[mote_id] = list()
             self.datapoints.get(mote_id).append(data)
-            self.lastdatainterval[mote_id] = 300
             self.lastdatapoint[mote_id] = data
             return motes_for_analysis
         prev_data = self.lastdatapoint.get(mote_id)
@@ -118,8 +113,6 @@ class Knowledge:
 
         elif (prev_data.get("transmission_number") + 1) % 100 == data.get("transmission_number"):
             self.datapoints.get(mote_id).append(data)
-            if (self.lastdatapoint[mote_id].get("transmission_power_setting") != -1000):
-                self.lastdatainterval[mote_id] = data.get("departure_time") - self.lastdatapoint[mote_id].get("departure_time")
             self.lastdatapoint[mote_id] = data
             motes_for_analysis.append(mote_id)
             return motes_for_analysis
@@ -200,14 +193,15 @@ class DecisionMaking:
             self.agents.append(Q_learner_model.Agent(self.knowledge.number_of_datapoints_per_state * self.knowledge.number_of_features, self.knowledge.number_of_actions))
             self.agents[n].handle_episode_start()
 
-    def determine_action(self, gateway, mote, state, objective_function):
-        print("making decision")
+
+    def determine_action(self, mote, state, objective_function):
         observation = Observation(state, objective_function)
         cluster = self.cluster_of_mote(mote)
         action = self.agents[cluster].step(mote, observation)
         if self.knowledge.getKnowledgeManager() is not None:
-            self.knowledge.getKnowledgeManager().observe_action(mote, action)
-        self.planner.plan(gateway, mote, action)
+            self.knowledge.getKnowledgeManager().observe_action(mote , action)
+        self.planner.plan(mote, action)
+
 
     def push_new_model(self, clusters, models, memories):
         self.agents = list()
@@ -279,9 +273,9 @@ class Executor:
     def __init__(self,mqtt_client):
         self.mqtt_client = mqtt_client
 
-    def execute_change(self, gatewayid, moteid, transmission_power, expiration_time, transmission_interval):
-        print("made a choice")
-        self.mqtt_client.send(("node/"+str(moteid)+"/application/1/tx"+"|"+'{"data":['+str(transmission_power)+','+str(expiration_time)+','+str(transmission_interval)+'],"macCommands":[]}'+"\n").encode("utf-8"))
+    def execute_change(self,moteid,transmission_power,expiration_time,transmission_interval):
+        self.mqtt_client.publish("node/"+str(moteid)+"/application/1/tx",'{"data":['+str(transmission_power)+','+str(expiration_time)+','+str(transmission_interval)+'],"macCommands":[]}')
+
 
 
 class LatencyGoal:

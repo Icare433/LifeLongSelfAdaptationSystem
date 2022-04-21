@@ -10,26 +10,28 @@ import statistics
 
 def readData(resultsfileName):
     data = {"cycle": [dict()], "packet_loss": [dict()], "energy_consumption": [dict()],
-            "freshness": [dict()], "utility": [dict()], "cluster": [dict()]}
+            "freshness": [dict()], "utility": [dict()], "cluster": []}
     results_file = open(resultsfileName, "r")
-    clustering = dict()
     cycle = [dict()]
     cluster = 0
     counter = dict()
     for line in results_file.readlines():
         if line == "changed\n":
+            for mote in cycle[cluster]:
+                print("mote " + mote + ": " + str(cycle[cluster].get(mote)))
             cluster = 1
             counter = dict()
         elif line[:len("recluster: ")] == "recluster: ":
-            #cluster += 1
-            #cycle.append(dict())
-            #for feature in data:
-            #    data[feature].append(dict())
+            cluster += 1
+            cycle.append(dict())
+            for feature in data:
+                data[feature].append(dict())
 
             to_search = line[len("recluster: "):-1]
             correcting_index = to_search.find(": [")
             dictstring = ""
             while correcting_index > -1:
+                print(to_search)
                 if to_search[correcting_index - 2] == " " or to_search[correcting_index - 2] == "{":
                     dictstring += to_search[:correcting_index - 1]
                     dictstring += '"'
@@ -45,10 +47,11 @@ def readData(resultsfileName):
                 to_search = to_search[correcting_index + 1:]
                 correcting_index = to_search.find(": [")
             dictstring += to_search
+            print(dictstring)
             cluster_data = json.loads(dictstring)
             for cluster_motes in cluster_data:
                 for mote_to_cluster in cluster_data[cluster_motes]:
-                    clustering[mote_to_cluster] = int(cluster_motes)
+                    data["cluster"][cluster - 1][mote_to_cluster] = [int(cluster_motes)]
 
         else:
             read_data = json.loads(line)
@@ -65,7 +68,8 @@ def readData(resultsfileName):
                     data[feature].append(dict())
 
             if counter.get(mote) > 0:
-                features = {"packet_loss": 0, "energy_consumption": 0, "freshness": 0, "utility": [0, 0, 0], "cluster": clustering.get(int(mote),0)}
+
+                features = {"packet_loss": 0, "energy_consumption": 0, "freshness": 0, "utility": [0, 0, 0]}
                 if cycle[cluster].get(mote) is None:
                     data["cycle"][cluster][mote] = list()
                     for feature in features:
@@ -105,6 +109,7 @@ def readData(resultsfileName):
                     features["utility"] = features["utility"][1] * 0.2 + features["utility"][2] * 0.8
                 else:
                     features["utility"] = sum(features["utility"]) / 3
+
                 for feature in features:
                     data[feature][cluster][mote].append(features[feature])
                 data["cycle"][cluster][mote].append(cycle[cluster][mote])
@@ -258,7 +263,7 @@ def plot_metrics(metrics, plot_names, cycles, metric_name, shape_name, is_global
     fig.write_html("./figures/" + shape_name + ".html")
 
 
-def heatmap_metric(metrics, metrics_2, plot_names, cycles, metric_name, shape_name, is_global=False, y_range=None,
+def heatmap_metric(metrics, plot_names, cycles, metric_name, shape_name, is_global=False, y_range=None,
                    line_colors=None):
     maxlist = list()
     for cluster in range(len(metrics)):
@@ -273,44 +278,24 @@ def heatmap_metric(metrics, metrics_2, plot_names, cycles, metric_name, shape_na
         data_matrix_mean.append(list())
     for cluster in range(1, len(metrics)):
         i = 0
+
         for mote in metrics[0]:
-            if metrics[cluster].get(mote) is not None:
+            if (metrics[cluster].get(mote) is not None):
                 data_matrix_mean[i].append(np.mean(metrics[cluster][mote]))
             else:
                 data_matrix_mean[i].append(None)
             i += 1
-
-    if metrics_2 is not None:
-        fig = make_subplots(2, 1)
-
-        data_2_matrix_mean = []
-        for cluster in range(len(metrics_2[0])):
-            data_2_matrix_mean.append(list())
-        for cluster in range(1, len(metrics_2)):
-            i = 0
-            for mote in metrics_2[0]:
-                if metrics_2[cluster].get(mote) is not None:
-                    data_2_matrix_mean[i].append(np.mean(metrics_2[cluster][mote]))
-                else:
-                    data_2_matrix_mean[i].append(None)
-                i += 1
-
-        fig.add_trace(go.Heatmap(
-            z=data_matrix_mean, hoverongaps=False, coloraxis = "coloraxis"), 1, 1)
-        fig.add_trace(
-            go.Heatmap(
-                z=data_2_matrix_mean, hoverongaps=False, coloraxis = "coloraxis"), 2, 1)
-    else:
-        fig = go.Figure(data=go.Heatmap(
-            z=data_matrix_mean, colorscale=[[0, 'green'], [1, 'red']], hoverongaps=False))
+    fig = px.imshow(data_matrix_mean, color_continuous_scale=[[0, 'green'], [1, 'red']])
     if y_range is None:
         y_range = [0, max_val + 5.0 * max_val / 100.0]
     fig.update_layout(
         yaxis=dict(
             title='motes',
+            range=y_range
         ),
         xaxis=dict(
-            title='cluster_cycles'
+            title='cluster_cycles',
+            # tickvals = years_count[cYear]
         ),
         margin=dict(l=0, r=0, t=0, b=0),
         legend=dict(
@@ -319,7 +304,6 @@ def heatmap_metric(metrics, metrics_2, plot_names, cycles, metric_name, shape_na
             xanchor="left",
             x=0.7
         ),
-        coloraxis={'colorscale': [[0, 'green'], [1, 'red']]}
         # title={
         # 'text': text_title,
         # 'y':.99,
@@ -328,7 +312,7 @@ def heatmap_metric(metrics, metrics_2, plot_names, cycles, metric_name, shape_na
         # 'yanchor': 'top'}
     )
 
-    #fig.write_image("./figures/" + shape_name + ".pdf")
+    # fig.write_image("./figures/" + shape_name + ".pdf")
     fig.write_html("./figures/" + shape_name + "_mean.html")
 
     data_matrix_max = []
@@ -337,13 +321,12 @@ def heatmap_metric(metrics, metrics_2, plot_names, cycles, metric_name, shape_na
     for cluster in range(1, len(metrics)):
         i = 0
         for mote in metrics[0]:
-            if metrics[cluster].get(mote) is not None:
+            if (metrics[cluster].get(mote) is not None):
                 data_matrix_max[i].append(np.max(metrics[cluster][mote]))
             else:
                 data_matrix_max[i].append(None)
             i += 1
-    fig = go.Figure(data=go.Heatmap(
-        z=data_matrix_max, colorscale=[[0, 'green'], [1, 'red']], hoverongaps = False))
+    fig = px.imshow(data_matrix_max, color_continuous_scale=[[0, 'green'], [1, 'red']])
     if y_range is None:
         y_range = [0, max_val + 5.0 * max_val / 100.0]
     fig.update_layout(
@@ -384,8 +367,7 @@ def heatmap_metric(metrics, metrics_2, plot_names, cycles, metric_name, shape_na
             else:
                 data_matrix_min[i].append(None)
             i += 1
-    fig = go.Figure(data=go.Heatmap(
-        z=data_matrix_min, colorscale=[[0, 'green'], [1, 'red']], hoverongaps = False))
+    fig = px.imshow(data_matrix_min, color_continuous_scale=[[0, 'green'], [1, 'red']])
 
     if y_range is None:
         y_range = [0, max_val + 5.0 * max_val / 100.0]
@@ -427,8 +409,7 @@ def heatmap_metric(metrics, metrics_2, plot_names, cycles, metric_name, shape_na
             else:
                 data_matrix_median[i].append(None)
             i += 1
-    fig = go.Figure(data=go.Heatmap(
-        z=data_matrix_median, colorscale=[[0, 'green'], [1, 'red']], hoverongaps=False))
+    fig = px.imshow(data_matrix_median, color_continuous_scale=[[0, 'green'], [1, 'red']])
     if y_range is None:
         y_range = [0, max_val + 5.0 * max_val / 100.0]
     fig.update_layout(
@@ -546,7 +527,7 @@ def plot_box_new(metrics, plot_names, cycles, metric_name, shape_name, is_global
     fig.write_html("./figures/" + shape_name + ".html")
 
 
-def plotAll(data, data_2 = None, name = "trial"):
+def plotAll(data, name):
     feature = list(data.keys())[0]
     colors = px.colors.qualitative.Dark24
     names = list()
@@ -555,17 +536,12 @@ def plotAll(data, data_2 = None, name = "trial"):
 
     for feature in data:
         if feature != "cycle":
-            plot_metrics(data.get(feature),  names,
+            plot_metrics(data.get(feature), names,
                          data.get("cycle"), feature,
                          name + "_goals_" + feature)
-            if data_2 is not None:
-               heatmap_metric(data.get(feature),data_2.get(feature), names,
-                            data.get("cycle"), feature,
-                            name + "_goals_" + feature + "_heatmap")
-            else:
-                heatmap_metric(data.get(feature) ,None, names,
-                               data.get("cycle"), feature,
-                               name + "_goals_" + feature + "_heatmap")
+            heatmap_metric(data.get(feature), names,
+                           data.get("cycle"), feature,
+                           name + "_goals_" + feature + "_heatmap")
             if False:  # feature == "energy_consumption":
 
                 cluster = 0
@@ -609,36 +585,33 @@ def plotAllBox(data, name, is_global=False):
 
 
 # data_two = readData("results.txt")
-data_switch = readData("results.txt")
-data_no_switch = readData("results_no_reclustering.txt")
-data_switch_global = readDataGlobal("results.txt")
-data_no_switch_global = readDataGlobal("results_no_reclustering.txt")
+data_switch = readData("results_recluster_long_BIRCH.txt")
+data_switch_global = readDataGlobal("results_recluster_long_BIRCH.txt")
 # [data_three, cycle_three] = readData("results_three_two.txt")
 
 data_global_diff = {"cycle": [dict(), dict()], "packet_loss": [dict(), dict()], "energy_consumption": [dict(), dict()],
                     "freshness": [dict(), dict()], "utility": [dict(), dict()]}
 
-#for feature in data_switch_global:
-#    for cluster in range(len(data_switch_global.get(feature))):
-#        print(feature + " cluster " + str(cluster) + " : " + str(sum(data_switch_global.get(feature)[cluster]["global"])
-#                                                                 / len(
-#            data_switch_global.get(feature)[cluster]["global"]))
-#              + " stdev: " + str(statistics.stdev(data_switch_global.get(feature)[cluster]["global"])))
+for feature in data_switch_global:
+    for cluster in range(len(data_switch_global.get(feature))):
+        print(feature + " cluster " + str(cluster) + " : " + str(sum(data_switch_global.get(feature)[cluster]["global"])
+                                                                 / len(
+            data_switch_global.get(feature)[cluster]["global"]))
+              + " stdev: " + str(statistics.stdev(data_switch_global.get(feature)[cluster]["global"])))
 
 data_global_diff = {"cycle": [dict(), dict()], "packet_loss": [dict(), dict()], "energy_consumption": [dict(), dict()],
                     "freshness": [dict(), dict()], "utility": [dict(), dict()]}
 
-#for feature in data_switch:
-#    for cluster in range(len(data_switch.get(feature))):
-#        for mote in data_switch.get(feature)[cluster]:
-#            print("mote: " + str(mote) + " " + feature + " + cluster " + str(cluster) + " : " + str(
-#                sum(data_switch.get(feature)[cluster][mote])
-#                / len(data_switch.get(feature)[cluster][mote])))
+for feature in data_switch:
+    for cluster in range(len(data_switch.get(feature))):
+        for mote in data_switch.get(feature)[cluster]:
+            print("mote: " + str(mote) + " " + feature + " + cluster " + str(cluster) + " : " + str(
+                sum(data_switch.get(feature)[cluster][mote])
+                / len(data_switch.get(feature)[cluster][mote])))
 
 # plotAll(data_two, "two")
-plotAll(data_switch, name="switch")
-plotAll(data_no_switch,data_switch, name = "comparision")
-plotAll(data_switch_global, name ="switch_global")
+plotAll(data_switch, "switch")
+plotAll(data_switch_global, "switch_global")
 # plotAll(data_three,cycle_three,"three")
 # plotAllBox(data_two, "two")
 # plotAllBox(data_switch, "switch")

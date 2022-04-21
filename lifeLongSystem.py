@@ -44,13 +44,13 @@ class TaskBasedKnowledgeMiner:
 
 class KnowledgeManager:
 
-    def __init__(self, learning_model, goal_model, reclustering_interval = 15, reclustering_delay = 15):
+    def __init__(self, learning_model, goal_model, reclustering_interval = 20, reclustering_delay = 30):
 
         self.experiences = list()
         self.learning_model = learning_model
         self.goal_model = goal_model
         self.last_experiences = dict()
-        self.new_data_per_mote = dict()
+        self.new_data_per_mote =dict()
         self.save_file = open("results.txt", "a")
         self.reclustering_interval = reclustering_interval
         self.reclustering_delay = reclustering_delay
