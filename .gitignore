@@ -17,3 +17,5 @@
 /results_third.txt
 /results_third_cluster.txt
 /results_trial_PCA_BIRCH.txt
+__pycache__/lifeLongSystem.cpython-310.pyc
+*.pyc

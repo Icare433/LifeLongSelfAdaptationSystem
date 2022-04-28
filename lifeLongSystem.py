@@ -44,7 +44,7 @@ class TaskBasedKnowledgeMiner:
 
 class KnowledgeManager:
 
-    def __init__(self, learning_model, goal_model, reclustering_interval = 20, reclustering_delay = 30):
+    def __init__(self, learning_model, goal_model, reclustering_interval = 30, reclustering_delay = 20):
 
         self.experiences = list()
         self.learning_model = learning_model
@@ -54,6 +54,7 @@ class KnowledgeManager:
         self.save_file = open("results.txt", "a")
         self.reclustering_interval = reclustering_interval
         self.reclustering_delay = reclustering_delay
+        self.reclusterd = False
 
     def get_current_goals(self):
         return self.goal_model
@@ -82,8 +83,9 @@ class KnowledgeManager:
             else:
                 recluster = False
 
-        if recluster & (self.clusteringManager is not None):
+        if (not self.reclusterd) and recluster and (self.clusteringManager is not None):
             self.clusteringManager.recluster()
+            self.reclusterd = True
 
     def observe_action(self, mote, action):
         if self.last_experiences.get(mote) is not None:

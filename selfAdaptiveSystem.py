@@ -43,8 +43,16 @@ lr = 0.1
 def get_data(message):
     datadict = json.loads(message).get("transmission")
     data = dict()
-    data["transmission_interval"] = datadict.get("content").get("payload")[-5]*5
-    data["expiration_time"] = datadict.get("content").get("payload")[-4]*5
+    if (datadict.get("content").get("payload")[-5]) < 0:
+        data["transmission_interval"] = (256 + (datadict.get("content").get("payload")[-5]))*5
+    else:
+        data["transmission_interval"] = (datadict.get("content").get("payload")[-5])*5
+
+    if datadict.get("content").get("payload")[-4] < 0:
+        data["expiration_time"] = (256 + datadict.get("content").get("payload")[-4]) * 5
+    else:
+        data["expiration_time"] = datadict.get("content").get("payload")[-4] * 5
+
     data["transmission_power_setting"] = datadict.get("content").get("payload")[-3]
     data["transmission_number"] = datadict.get("content").get("payload")[-2]
     data["latency"] = datadict.get("content").get("payload")[-1]
@@ -77,7 +85,7 @@ def create_lost_data(number,transmission_interval):
 
 class Knowledge:
 
-    def __init__(self,goal_model,number_of_datapoints_per_state = 5, number_of_features = 8, number_of_actions = 15, knowledgeManager = None):
+    def __init__(self,goal_model,number_of_datapoints_per_state = 10, number_of_features = 8, number_of_actions = 15, knowledgeManager = None):
         self.number_of_datapoints_per_state = number_of_datapoints_per_state
         self.number_of_features = number_of_features
         self.number_of_actions = number_of_actions
@@ -90,15 +98,15 @@ class Knowledge:
 
     def add_data(self, mote_id, data):
         motes_for_analysis = []
-        self.expected_next_transmission[mote_id] = data.get("departure_time") + 300
-        for mote in self.expected_next_transmission:
-            if self.expected_next_transmission[mote] < data.get("departure_time"):
-                number = (self.lastdatapoint.get(mote).get("transmission_number") + 1) % 100
-                lost_data = create_lost_data(number, self.lastdatapoint[mote].get("transmission_interval"))
-                self.datapoints.get(mote).append(lost_data)
-                self.expected_next_transmission[mote] = data.get("departure_time") + 300
-                self.lastdatapoint[mote] = lost_data
-        #       motes_for_analysis.append(mote)
+        #self.expected_next_transmission[mote_id] = data.get("departure_time") + 300
+        #for mote in self.expected_next_transmission:
+        #    if self.expected_next_transmission[mote] < data.get("departure_time"):
+        #        number = (self.lastdatapoint.get(mote).get("transmission_number") + 1) % 100
+        #        lost_data = create_lost_data(number, self.lastdatapoint[mote].get("transmission_interval"))
+        #        self.datapoints.get(mote).append(lost_data)
+        #        self.expected_next_transmission[mote] = data.get("departure_time") + 300
+        #        self.lastdatapoint[mote] = lost_data
+        #        motes_for_analysis.append(mote)
         if mote_id not in self.datapoints:
             self.datapoints[mote_id] = list()
             self.datapoints.get(mote_id).append(data)
@@ -178,7 +186,7 @@ class Analyser:
             if self.knowledge.getKnowledgeManager() is not None:
                 self.knowledge.getKnowledgeManager().observe_state(mote,state,reward)
 
-            self.decision_making.determine_action(self.gateway, mote, state_vector, reward)
+            self.decision_making.determine_action(mote, state_vector, reward)
 
 
 
@@ -206,14 +214,17 @@ class DecisionMaking:
     def push_new_model(self, clusters, models, memories):
         self.agents = list()
         index = 0
+        self.clustering = dict()
         while index < len(models):
             self.agents.append(Q_learner_model.Agent(self.knowledge.number_of_datapoints_per_state * self.knowledge.number_of_features, self.knowledge.number_of_actions))
             self.agents[len(self.agents)-1].learning_model = models[index]
             self.agents[len(self.agents) - 1].memory = memories[index]
             self.agents[len(self.agents)-1].handle_episode_start()
+
             for mote in clusters[index]:
                 self.clustering[mote] = index
             index += 1
+        print(self.clustering)
 
 
     def cluster_of_mote(self, mote):
@@ -251,6 +262,8 @@ class Monitor:
 
             except ValueError:
                 return
+            except IndexError:
+                return
             if len(should_analyse) > 0:
                 for mote_id in should_analyse:
                     self.analyser.analyse_new_datapoint(mote_id)
@@ -263,10 +276,10 @@ class Planner:
     def __init__(self, executer):
         self.executer = executer
 
-    def plan(self, gateway, mote, action_number):
+    def plan(self, mote, action_number):
         if action_number != 0:
             action = self.actionTable.get(action_number)
-            self.executer.execute_change(gateway, mote, action[0], action[1], action[2])
+            self.executer.execute_change(mote, action[0], action[1], action[2])
 
 class Executor:
 
@@ -274,7 +287,8 @@ class Executor:
         self.mqtt_client = mqtt_client
 
     def execute_change(self,moteid,transmission_power,expiration_time,transmission_interval):
-        self.mqtt_client.publish("node/"+str(moteid)+"/application/1/tx",'{"data":['+str(transmission_power)+','+str(expiration_time)+','+str(transmission_interval)+'],"macCommands":[]}')
+        print("made a choice")
+        self.mqtt_client.send(("node/"+str(moteid)+"/application/1/tx"+"|"+'{"data":['+str(transmission_power)+','+str(expiration_time)+','+str(transmission_interval)+'],"macCommands":[]}'+"\n").encode('utf-8'))
 
 
 
