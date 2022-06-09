@@ -207,7 +207,7 @@ class DecisionMaking:
         cluster = self.cluster_of_mote(mote)
         action = self.agents[cluster].step(mote, observation)
         if self.knowledge.getKnowledgeManager() is not None:
-            self.knowledge.getKnowledgeManager().observe_action(mote , action)
+            self.knowledge.getKnowledgeManager().observe_action(mote, action)
         self.planner.plan(mote, action)
 
 
@@ -239,6 +239,7 @@ class Monitor:
         self.knowledge = knowledge
         self.analyser = analyser
         self.queue = queue
+        self.timefile= open("times.txt","a")
 
     def monitor(self):
 
@@ -264,9 +265,11 @@ class Monitor:
                 return
             except IndexError:
                 return
+
             if len(should_analyse) > 0:
                 for mote_id in should_analyse:
                     self.analyser.analyse_new_datapoint(mote_id)
+
 
 class Planner:
 
@@ -305,6 +308,32 @@ class LatencyGoal:
                 satisfaction += 1 - max(0, (transmission.get("latency")*transmission.get("expiration_time")/100-self.value))\
                                / (transmission.get("latency")*transmission.get("expiration_time")/100+1)
                 counter += 1
+        if counter > 0:
+            satisfaction = satisfaction / counter
+        else:
+            satisfaction = 0
+        return satisfaction
+
+
+class AvailabiltyGoal:
+
+    def __init__(self, value):
+        self.value = value
+
+    def evaluate(self, state):
+        satisfaction = 0
+        counter= 0
+        last_transmitted = None
+        for transmission in state:
+            if transmission["transmission_power_setting"] == -1000:
+                last_transmitted = None
+            if transmission["transmission_power_setting"] != -1000:
+                if last_transmitted is not None and transmission.get("departure_time") - last_transmitted > 0 and transmission.get("departure_time") - last_transmitted < 400:
+                    satisfaction += 1 - max(0, (transmission.get("departure_time") - last_transmitted -self.value))\
+                               / (transmission.get("departure_time") - last_transmitted + 1)
+                    counter += 1
+                last_transmitted = transmission.get("departure_time")
+
         if counter > 0:
             satisfaction = satisfaction / counter
         else:

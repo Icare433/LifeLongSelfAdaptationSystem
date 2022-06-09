@@ -1,8 +1,8 @@
 import math
 
 import numpy as np
-from sklearn.cluster import Birch
-from sklearn.manifold import MDS
+from sklearn.cluster import Birch, OPTICS, SpectralClustering
+from sklearn.manifold import MDS, LocallyLinearEmbedding
 from sklearn.mixture import GaussianMixture
 
 import Q_learner
@@ -83,12 +83,14 @@ class KnowledgeManager:
             else:
                 recluster = False
 
-        if (not self.reclusterd) and recluster and (self.clusteringManager is not None):
+        if recluster and (self.clusteringManager is not None):
             self.clusteringManager.recluster()
             self.reclusterd = True
 
     def observe_action(self, mote, action):
         if self.last_experiences.get(mote) is not None:
+            self.save_file.write(str(action))
+            self.save_file.write("\n")
             self.last_experiences.get(mote).add_action(action)
 
     def get_experiences(self, size, motes):
@@ -214,7 +216,8 @@ class ClusteringManager:
         def recluster(self):
             print("recluster")
             [mote_array, data_for_clustering] = self.knowledgeManager.cluster_data()
-            clusters = self.cluster_detection.determine_clustering(mote_array, data_for_clustering, clusterer=Birch)
+            clusters = self.cluster_detection.determine_clustering(mote_array, data_for_clustering,
+                                                                   reducer=LocallyLinearEmbedding(n_components=5, method='modified'), clusterer=SpectralClustering)
 
             self.knowledgeManager.save_file.write("recluster: "+str(clusters)+"\n")
             print(clusters)

@@ -1,4 +1,4 @@
-from sklearn.cluster import AgglomerativeClustering
+from sklearn.cluster import AgglomerativeClustering, Birch
 from sklearn.decomposition import PCA
 from sklearn.mixture import GaussianMixture as GMM
 from sklearn import metrics
@@ -19,7 +19,7 @@ class ClusterDetection:
     def reduce_dimensionality(self):
         return None
 
-    def determine_clustering(self, mote_array, data, reducer=PCA(0.99), clusterer = AgglomerativeClustering):
+    def determine_clustering(self, mote_array, data, reducer=PCA(0.99), clusterer = Birch):
         n_clusters = np.arange(2, 15)
         best_sil = -20
         best_model = None
