@@ -70,7 +70,7 @@ def get_data(message):
     return data
 
 
-def create_lost_data(number,transmission_interval):
+def create_lost_data(number,transmission_interval,departure_time):
         lost_data = dict()
         lost_data["transmission_interval"] = transmission_interval
         lost_data["expiration_time"] = -1000
@@ -78,7 +78,7 @@ def create_lost_data(number,transmission_interval):
         lost_data["transmission_number"] = number
         lost_data["latency"] = -1000
         lost_data["transmission_power"] = -2000
-        lost_data["departure_time"] = -1000
+        lost_data["departure_time"] = departure_time
         lost_data["receiver"] = -1000
         return lost_data
 
@@ -95,18 +95,20 @@ class Knowledge:
         self.lastdatapoint = dict()
         self.knowledgeManager = knowledgeManager
         self.expected_next_transmission = dict()
+        self.maximum_time_between_transmissions = 300
 
     def add_data(self, mote_id, data):
         motes_for_analysis = []
-        #self.expected_next_transmission[mote_id] = data.get("departure_time") + 300
-        #for mote in self.expected_next_transmission:
-        #    if self.expected_next_transmission[mote] < data.get("departure_time"):
-        #        number = (self.lastdatapoint.get(mote).get("transmission_number") + 1) % 100
-        #        lost_data = create_lost_data(number, self.lastdatapoint[mote].get("transmission_interval"))
-        #        self.datapoints.get(mote).append(lost_data)
-        #        self.expected_next_transmission[mote] = data.get("departure_time") + 300
-        #        self.lastdatapoint[mote] = lost_data
-        #        motes_for_analysis.append(mote)
+        self.expected_next_transmission[mote_id] = (data.get("departure_time") + self.maximum_time_between_transmissions)%86400
+
+        for mote in self.expected_next_transmission:
+            if self.expected_next_transmission[mote] < int(data.get("departure_time")) and int(data.get("departure_time")) - self.expected_next_transmission[mote] < 1000:
+                number = (self.lastdatapoint.get(mote).get("transmission_number") + 1) % 100
+                lost_data = create_lost_data(number, self.lastdatapoint[mote].get("transmission_interval"),data.get("departure_time"))
+                self.datapoints.get(mote).append(lost_data)
+                self.expected_next_transmission[mote] = (int(data.get("departure_time")) + self.maximum_time_between_transmissions)%86400
+                self.lastdatapoint[mote] = lost_data
+                motes_for_analysis.append(mote)
         if mote_id not in self.datapoints:
             self.datapoints[mote_id] = list()
             self.datapoints.get(mote_id).append(data)
@@ -127,7 +129,7 @@ class Knowledge:
 
         elif data.get("transmission_number") > prev_data.get("transmission_number"):
             for number in range(prev_data.get("transmission_number"), data.get("transmission_number")):
-                self.datapoints.get(mote_id).append(create_lost_data(number, prev_data.get("transmission_interval")))
+                self.datapoints.get(mote_id).append(create_lost_data(number, prev_data.get("transmission_interval"),data.get("departure_time")))
             self.datapoints.get(mote_id).append(data)
             self.lastdatapoint[mote_id] = data
             motes_for_analysis.append(mote_id)
@@ -136,10 +138,10 @@ class Knowledge:
         elif prev_data.get("transmission_number") - data.get("transmission_number")-10 > 0:
 
             for number in range(prev_data.get("transmission_number"), 100):
-                self.datapoints.get(mote_id).append(create_lost_data(number, prev_data.get("transmission_interval")))
+                self.datapoints.get(mote_id).append(create_lost_data(number, prev_data.get("transmission_interval"),data.get("departure_time")))
 
             for number in range(0, data.get("transmission_number")):
-                self.datapoints.get(mote_id).append(create_lost_data(number, prev_data.get("transmission_interval")))
+                self.datapoints.get(mote_id).append(create_lost_data(number, prev_data.get("transmission_interval"),data.get("departure_time")))
 
             self.datapoints.get(mote_id).append(data)
             self.lastdatapoint[mote_id] = data
@@ -169,9 +171,9 @@ class Analyser:
         if self.new_datapoint_counter.get(mote) is None:
             self.new_datapoint_counter[mote] = 0
         # A new datapoint for a mote is available
-        self.new_datapoint_counter[mote] = self.new_datapoint_counter.get(mote) + 1
+        self.new_datapoint_counter[mote] = self.new_datapoint_counter[mote] + 1
         # If enough points are available to create
-        if self.new_datapoint_counter.get(mote) > self.knowledge.number_of_datapoints_per_state:
+        if self.new_datapoint_counter[mote] > self.knowledge.number_of_datapoints_per_state:
             self.new_datapoint_counter[mote] = 0
 
             state = self.knowledge.get_last_state_vector(mote)
@@ -225,6 +227,7 @@ class DecisionMaking:
                 self.clustering[mote] = index
             index += 1
         print(self.clustering)
+
 
 
     def cluster_of_mote(self, mote):
@@ -290,7 +293,7 @@ class Executor:
         self.mqtt_client = mqtt_client
 
     def execute_change(self,moteid,transmission_power,expiration_time,transmission_interval):
-        print("made a choice")
+        print("made a choice " + str(moteid))
         self.mqtt_client.send(("node/"+str(moteid)+"/application/1/tx"+"|"+'{"data":['+str(transmission_power)+','+str(expiration_time)+','+str(transmission_interval)+'],"macCommands":[]}'+"\n").encode('utf-8'))
 
 
@@ -325,8 +328,6 @@ class AvailabiltyGoal:
         counter= 0
         last_transmitted = None
         for transmission in state:
-            if transmission["transmission_power_setting"] == -1000:
-                last_transmitted = None
             if transmission["transmission_power_setting"] != -1000:
                 if last_transmitted is not None and transmission.get("departure_time") - last_transmitted > 0 and transmission.get("departure_time") - last_transmitted < 400:
                     satisfaction += 1 - max(0, (transmission.get("departure_time") - last_transmitted -self.value))\
@@ -353,6 +354,7 @@ class PacketlossGoal:
                 satisfaction+= 1.0
         satisfaction = satisfaction / len(state)
         satisfaction = min(max(1.0 - (satisfaction-self.value)*4,0),1.0)
+
         return satisfaction
 
 class EnergyconsumptionGoal:
@@ -381,7 +383,7 @@ class ListGoalModel:
         reward = 0.0
         for goal in range(len(self.goals)):
             reward +=self.goals[goal].evaluate(state)*self.weights[goal]
-        return reward / len(self.goals)
+        return reward
 
 
 

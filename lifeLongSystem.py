@@ -44,7 +44,7 @@ class TaskBasedKnowledgeMiner:
 
 class KnowledgeManager:
 
-    def __init__(self, learning_model, goal_model, reclustering_interval = 30, reclustering_delay = 20):
+    def __init__(self, learning_model, goal_model, reclustering_interval = 20, reclustering_delay = 15):
 
         self.experiences = list()
         self.learning_model = learning_model
@@ -52,6 +52,7 @@ class KnowledgeManager:
         self.last_experiences = dict()
         self.new_data_per_mote =dict()
         self.save_file = open("results.txt", "a")
+        self.metrics_file = open("results_metrics.txt", "a")
         self.reclustering_interval = reclustering_interval
         self.reclustering_delay = reclustering_delay
         self.reclusterd = False
@@ -65,6 +66,12 @@ class KnowledgeManager:
     def observe_state(self, mote, state, reward):
         self.save_file.write(json.dumps({mote:state}))
         self.save_file.write("\n")
+        last_transmitted_time = 0
+        for transmision in state:
+            if transmision["departure_time"] > 0:
+                last_transmitted_time = transmision["departure_time"]
+        self.metrics_file.write(json.dumps({mote: {"utility": reward, "time": last_transmitted_time}}))
+        self.metrics_file.write("\n")
         experience = Experience(state, reward, mote)
         if self.last_experiences.get(mote) is not None:
             self.last_experiences.get(mote).add_next_state(experience.state, experience.reward)
@@ -76,14 +83,16 @@ class KnowledgeManager:
         self.last_experiences[mote] = experience
 
         recluster = False
-        for mote in self.new_data_per_mote:
-            if self.new_data_per_mote[mote] > self.reclustering_interval:
+        for observed_mote in self.new_data_per_mote:
+            if self.new_data_per_mote[observed_mote] > self.reclustering_interval:
                 recluster = True
 
             else:
-                recluster = False
+                if not observed_mote == 1:
+                    recluster = False
 
-        if recluster and (self.clusteringManager is not None):
+
+        if False and recluster and (self.clusteringManager is not None):
             self.clusteringManager.recluster()
             self.reclusterd = True
 
@@ -217,7 +226,7 @@ class ClusteringManager:
             print("recluster")
             [mote_array, data_for_clustering] = self.knowledgeManager.cluster_data()
             clusters = self.cluster_detection.determine_clustering(mote_array, data_for_clustering,
-                                                                   reducer=LocallyLinearEmbedding(n_components=5, method='modified'), clusterer=SpectralClustering)
+                                                                   reducer=LocallyLinearEmbedding(n_components=2, method='modified'), clusterer=GaussianMixture)
 
             self.knowledgeManager.save_file.write("recluster: "+str(clusters)+"\n")
             print(clusters)

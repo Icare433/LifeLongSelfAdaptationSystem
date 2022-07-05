@@ -21,7 +21,7 @@ class ClusterDetection:
 
     def determine_clustering(self, mote_array, data, reducer=PCA(0.99), clusterer = Birch):
         n_clusters = np.arange(2, 15)
-        best_sil = -20
+        best_sil = 10000
         best_model = None
         sils = []
         sils_err = []
@@ -31,14 +31,15 @@ class ClusterDetection:
             tmp_sil = []
             for _ in range(iterations):
                 try:
-                    labels = clusterer(n_clusters=n).fit_predict(data)
-                    sil = metrics.silhouette_score(data, labels, metric='euclidean')
+                    gm = clusterer(n_components=n).fit(data)
+                    labels = clusterer(n_components=n).fit_predict(data)
+                    sil = gm.bic(data)
                     tmp_sil.append(sil)
-                    if sil > best_sil:
+                    if sil < best_sil:
                         best_sil = sil
                         best_model = labels
-                except Exception:
-                    pass
+                except Exception as e:
+                    print(e)
             val = np.mean(sel_best(np.array(tmp_sil), int(iterations / 5)))
             err = np.std(tmp_sil)
             sils.append(val)
