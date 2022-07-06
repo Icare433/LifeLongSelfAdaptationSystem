@@ -12,6 +12,8 @@ import math
 
 import logging
 
+import Q_learner_full
+
 logging.basicConfig(filename='shapes.log', level=logging.DEBUG)
 
 q=queue.Queue()
@@ -173,18 +175,30 @@ class Analyser:
         # A new datapoint for a mote is available
         self.new_datapoint_counter[mote] = self.new_datapoint_counter[mote] + 1
         # If enough points are available to create
-        if self.new_datapoint_counter[mote] > self.knowledge.number_of_datapoints_per_state:
-            self.new_datapoint_counter[mote] = 0
-
-            state = self.knowledge.get_last_state_vector(mote)
+        complete_state = False
+        for mote_id in self.new_datapoint_counter:
+            if self.new_datapoint_counter[mote_id] > self.knowledge.number_of_datapoints_per_state:
+                complete_state = True
+            else:
+                complete_state = False
+        complete_state = complete_state and len(self.new_datapoint_counter) == self.knowledge.number_of_motes
+        if complete_state:
             state_vector = list()
-            for transmission in state:
-                if transmission.get("transmission_power_setting") != -1000:
-                    self.gateway = transmission.get("receiver")
-                for value in list(transmission.values()):
-                    state_vector.append(value)
+            reward = 0.0
+            for mote_id in self.new_datapoint_counter:
+                self.new_datapoint_counter[mote_id] = 0
+
+                state = self.knowledge.get_last_state_vector(mote)
+
+                for transmission in state:
+                    if transmission.get("transmission_power_setting") != -1000:
+                        self.gateway = transmission.get("receiver")
+                    for value in list(transmission.values()):
+                        state_vector.append(value)
+
+                reward += self.knowledge.goal_model.evaluate(state)
+            reward = reward/self.knowledge.number_of_motes
             state_vector = np.array(state_vector, dtype=np.float64)
-            reward = self.knowledge.goal_model.evaluate(state)
             if self.knowledge.getKnowledgeManager() is not None:
                 self.knowledge.getKnowledgeManager().observe_state(mote,state,reward)
 
@@ -194,25 +208,23 @@ class Analyser:
 
 class DecisionMaking:
 
-    def __init__(self, planner, knowledge, nb_agents):
+    def __init__(self, planner, knowledge):
         self.clustering = dict()
         self.planner = planner
         self.knowledge = knowledge
-        self.agents = list()
+        self.agent = Q_learner_full.Agent(self.knowledge.number_of_datapoints_per_state *
+                                           self.knowledge.number_of_features * self.knowledge.number_of_motes,
+                                           self.knowledge.number_of_actions * self.knowledge.number_of_motes)
+        self.agent.handle_episode_start()
 
-
-        for n in range(nb_agents):
-            self.agents.append(Q_learner_model.Agent(self.knowledge.number_of_datapoints_per_state * self.knowledge.number_of_features, self.knowledge.number_of_actions))
-            self.agents[n].handle_episode_start()
 
 
     def determine_action(self, mote, state, objective_function):
         observation = Observation(state, objective_function)
-        cluster = self.cluster_of_mote(mote)
-        action = self.agents[cluster].step(mote, observation)
+        action = self.agent.step(observation)
         if self.knowledge.getKnowledgeManager() is not None:
             self.knowledge.getKnowledgeManager().observe_action(mote, action)
-        self.planner.plan(mote, action)
+        self.planner.plan(action)
 
 
     def push_new_model(self, clusters, models, memories):
@@ -284,10 +296,9 @@ class Planner:
     def __init__(self, executer):
         self.executer = executer
 
-    def plan(self, mote, action_number):
-        if action_number != 0:
-            action = self.actionTable.get(action_number)
-            self.executer.execute_change(mote, action[0], action[1], action[2])
+    def plan(self, action_vector):
+        for mote in range(self.knowledge.number_of_motes):
+            self.executer.execute_change(mote, action_vector[mote*6+0] -action_vector[mote*6+1], action_vector[mote*6+2]*5 - action_vector[mote*6+3] *5, action_vector[mote*6+4]*5 - action_vector[mote*6+5] *5)
 
 class Executor:
 

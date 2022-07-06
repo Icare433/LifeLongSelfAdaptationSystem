@@ -1,10 +1,11 @@
 import numpy as np
 import tensorflow as tf
 from collections import deque
+import multiprocessing
 
 import logging
 
-logging.basicConfig(filename='loss_function.log', level=logging.DEBUG)
+logging.basicConfig(filename='example.log', level=logging.DEBUG)
 
 def dense(x, weights, bias, activation=tf.identity, **activation_kwargs):
     """Dense layer."""
@@ -78,40 +79,9 @@ class Network(object):
             qvalues = tf.squeeze(self.model(inputs))
             preds = tf.reduce_sum(qvalues * actions_one_hot, axis=1)
             loss = tf.losses.mean_squared_error(targets, preds)
-        logging.warning(loss.numpy())
+
         grads = tape.gradient(loss, self.trainable_variables)
         self.optimizer.apply_gradients(zip(grads, self.trainable_variables))
-
-    def validate_step(self, inputs, targets, actions_one_hot):
-        """validate"""
-        qvalues = tf.squeeze(self.model(inputs))
-        preds = tf.reduce_sum(qvalues * actions_one_hot, axis=1)
-        loss = tf.keras.losses.MeanAbsolutePercentageError()(targets, preds)
-
-    def newModel(self):
-        inp = tf.keras.layers.Input([80])
-        hid = tf.keras.layers.Dense(50,activation=tf.nn.relu)(inp)
-        hid = tf.keras.layers.Dense(50,activation=tf.nn.relu)(hid)
-        hid = tf.keras.layers.Dense(15,activation=tf.identity)(hid)
-        hid = tf.keras.layers.Dense(1, activation=tf.nn.softmax)(hid)
-        self.n_model = tf.keras.Model(inputs=inp,outputs=hid)
-
-        self.n_model.summary()
-        self.n_model.compile(
-            optimizer=tf.optimizers.Adam(),
-            loss=tf.keras.losses.MeanSquaredError(),
-            metrics=[tf.keras.metrics.Accuracy()]
-        )
-
-    def train(self,inputs,targets):
-        preds = tf.reduce_sum(qvalues * actions_one_hot, axis=1)
-        self.n_model.fit(
-            inputs,
-            preds,
-            batch_size = 32,
-            epochs=10
-        )
-
 
 
 class Memory(object):
@@ -162,7 +132,6 @@ class Agent(object):
         self.action_space_size = action_space_size
 
         self.learning_model = Network(state_space_size, action_space_size)
-        self.learning_model.newModel()
 
         # training parameters
         self.discount = discount
@@ -180,7 +149,7 @@ class Agent(object):
 
 
     def handle_episode_start(self):
-        self.last_states, self.last_actions = dict(), dict()
+        self.last_state, self.last_action = None
 
     def step(self, mote, observation, training=True):
         """Observe state and rewards, select action.
@@ -211,10 +180,9 @@ class Agent(object):
 
             if self.steps > self.replay_start_size:
                 self.train_network()
-                self.validate_network()
 
-        self.last_states[mote] = state
-        self.last_actions[mote] = action
+        self.last_state = state
+        self.last_action = action
 
         return action
 
@@ -224,15 +192,24 @@ class Agent(object):
         explore = max(explore_prob, self.min_explore) > np.random.rand()
 
         if training and explore:
-            action = np.random.randint(self.action_space_size)
+            action = list()
+            for _ in range(self.action_space_size):
+                action.append(np.random.randint(1))
+            action = np.array(action)
         else:
             inputs = np.array(state, dtype=np.float64)
             inputs = np.expand_dims(inputs, 0)
 
-            qvalues = self.learning_model.model(inputs)
-            action = np.squeeze(np.argmax(qvalues, axis=-1))
+            qvalues = np.squeeze(self.learning_model.model(inputs))
+            action = list()
+            for index in range(len(qvalues)):
+                if qvalues[index] >= 0.5:
+                    action.append(1)
+                else:
+                    action.append(0)
+            action = np.array(action)
 
-        return int(action)
+        return action
 
 
     def train_network(self):
@@ -247,19 +224,5 @@ class Agent(object):
 
         next_qvalues = np.squeeze(self.learning_model.model(next_inputs))
         targets = rewards + self.discount * np.amax(next_qvalues, axis=-1)
-        self.learning_model.train(inputs,targets)
-        #self.learning_model.train_step(inputs, targets, actions_one_hot)
 
-    def validate_network(self):
-        """validate network on experience batch"""
-        batch = self.memory.sample(self.batch_size)
-        inputs = np.array([b["state"] for b in batch], dtype=np.float64)
-        actions = np.array([b["action"] for b in batch], dtype=int)
-        rewards = np.array([b["reward"] for b in batch], dtype=np.float64)
-        next_inputs = np.array([b["next_state"] for b in batch], dtype=np.float64)
-
-        actions_one_hot = np.eye(self.action_space_size)[actions]
-
-        targets = rewards
-
-        self.learning_model.validate_step(inputs, targets, actions_one_hot)
+        self.learning_model.train_step(inputs, targets, actions_one_hot)
