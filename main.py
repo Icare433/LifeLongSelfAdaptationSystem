@@ -26,8 +26,8 @@ s.connect((HOST, PORT))
 
 
 def main():
-    latency_goal = selfAdaptiveSystem.LatencyGoal(60)
-    availability_goal = selfAdaptiveSystem.AvailabiltyGoal(100)
+    latency_goal = selfAdaptiveSystem.LatencyGoal(15)
+    availability_goal = selfAdaptiveSystem.AvailabiltyGoal(120)
     packet_loss_goal = selfAdaptiveSystem.PacketlossGoal(0.05)
     energy_goal = selfAdaptiveSystem.EnergyconsumptionGoal()
     goal_list = list()

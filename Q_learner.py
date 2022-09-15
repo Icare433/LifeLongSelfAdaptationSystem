@@ -1,3 +1,7 @@
+import json
+import os
+from random import random
+
 import numpy as np
 import tensorflow as tf
 from collections import deque
@@ -15,7 +19,7 @@ def dense(x, weights, bias, activation=tf.identity, **activation_kwargs):
 def init_weights(shape, initializer):
     """Initialize weights for tensorflow layer."""
     weights = tf.Variable(
-        initializer(shape,dtype=tf.float64),
+        initializer(shape, dtype=tf.float64),
         trainable=True,
         dtype=tf.float64
     )
@@ -26,104 +30,108 @@ def init_weights(shape, initializer):
 class Network(object):
     """Q-function approximator."""
 
-    def __init__(self,
-                 input_size,
-                 output_size,
-                 hidden_size=[50, 50],
-                 weights_initializer=tf.initializers.glorot_uniform(),
-                 bias_initializer=tf.initializers.zeros(),
-                 optimizer=tf.optimizers.Adam,
-                 **optimizer_kwargs):
-        """Initialize weights and hyperparameters."""
-        self.input_size = input_size
-        self.output_size = output_size
-        self.hidden_size = hidden_size
+    def __init__(self,time_step, feature_size, output_size, learning_rate = 0.01):
+        init = tf.keras.initializers.HeUniform()
+        self.model = tf.keras.Sequential()
+        self.model.add(tf.keras.layers.InputLayer(input_shape=(time_step,feature_size,1)))
+        self.model.add(tf.keras.layers.Conv2D(filters=128, kernel_size=(3,3), activation=None, kernel_initializer=init))
+        self.model.add(tf.keras.layers.BatchNormalization())
+        self.model.add(tf.keras.layers.Activation(tf.keras.activations.relu))
+        #self.model.add(tf.keras.layers.Conv1D(filters=32, kernel_size=3, activation=None, kernel_initializer=init))
+        #self.model.add(tf.keras.layers.BatchNormalization())
+        #self.model.add(tf.keras.layers.Activation(tf.keras.activations.relu))
+        self.model.add(tf.keras.layers.MaxPool2D(pool_size=(2,2)))
+        self.model.add(tf.keras.layers.Dropout(0.25))
+        self.model.add(tf.keras.layers.Dense(120, activation='relu', kernel_initializer=init))
+        self.model.add(tf.keras.layers.Dense(120, activation='relu', kernel_initializer=init))
+        self.model.add(tf.keras.layers.Flatten())
+        self.model.add(tf.keras.layers.Dense(output_size, activation='tanh'))
 
-        np.random.seed(41)
 
-        self.initialize_weights(weights_initializer, bias_initializer)
-        self.optimizer = optimizer(**optimizer_kwargs)
+        self.model.compile(
+            loss=tf.keras.losses.MeanSquaredLogarithmicError(),
+            optimizer=tf.keras.optimizers.Adam(learning_rate=learning_rate),
+            metrics=['accuracy'])
 
-    def initialize_weights(self, weights_initializer, bias_initializer):
-        """Initialize and store weights."""
-        wshapes = [
-            [self.input_size, self.hidden_size[0]],
-            [self.hidden_size[0], self.hidden_size[1]],
-            [self.hidden_size[1], self.output_size]
-        ]
+        checkpoint_path = "training_1_full/cp.ckpt"
 
-        bshapes = [
-            [1, self.hidden_size[0]],
-            [1, self.hidden_size[1]],
-            [1, self.output_size]
-        ]
+        self.model.load_weights(checkpoint_path)
 
-        self.weights = [init_weights(s, weights_initializer) for s in wshapes]
-        self.biases = [init_weights(s, bias_initializer) for s in bshapes]
 
-        self.trainable_variables = self.weights + self.biases
+    def model(self, state):
+        return self.model.predict(state)[0]
 
-    def model(self, inputs):
-        """Given a state vector, return the Q values of actions."""
-        h1 = dense(inputs, self.weights[0], self.biases[0], tf.nn.relu)
-        h2 = dense(h1, self.weights[1], self.biases[1], tf.nn.relu)
+    def train_step(self, train_batch,validation_batch):
+        learning_rate = 0.7  # Learning rate
+        discount_factor = 0.618
 
-        out = dense(h2, self.weights[2], self.biases[2])
+        current_states = np.array([experience["state"] for experience in train_batch])
+        current_qs_list = self.model.predict(current_states)
+        new_current_states = np.array([experience["next_state"] for experience in train_batch])
+        future_qs_list = self.model.predict(new_current_states)
 
-        return out
+        X = []
+        Y = []
+        for index, experience in enumerate(train_batch):
+            max_future_q = experience["reward"] + discount_factor * np.max(future_qs_list[index])
 
-    def train_step(self, inputs, targets, actions_one_hot):
-        """Update weights."""
-        with tf.GradientTape() as tape:
-            qvalues = tf.squeeze(self.model(inputs))
-            preds = tf.reduce_sum(qvalues * actions_one_hot, axis=1)
-            loss = tf.losses.mean_squared_error(targets, preds)
-        logging.warning(loss.numpy())
-        grads = tape.gradient(loss, self.trainable_variables)
-        self.optimizer.apply_gradients(zip(grads, self.trainable_variables))
+            current_qs = current_qs_list[index]
+            current_qs[experience["action"]] = (1 - learning_rate) * current_qs[experience["action"]] + learning_rate * max_future_q
 
-    def validate_step(self, inputs, targets, actions_one_hot):
-        """validate"""
-        qvalues = tf.squeeze(self.model(inputs))
-        preds = tf.reduce_sum(qvalues * actions_one_hot, axis=1)
-        loss = tf.keras.losses.MeanAbsolutePercentageError()(targets, preds)
+            X.append(experience["state"])
+            Y.append(current_qs)
 
-    def newModel(self):
-        inp = tf.keras.layers.Input([80])
-        hid = tf.keras.layers.Dense(50,activation=tf.nn.relu)(inp)
-        hid = tf.keras.layers.Dense(50,activation=tf.nn.relu)(hid)
-        hid = tf.keras.layers.Dense(15,activation=tf.identity)(hid)
-        hid = tf.keras.layers.Dense(1, activation=tf.nn.softmax)(hid)
-        self.n_model = tf.keras.Model(inputs=inp,outputs=hid)
+        current_states = np.array([experience["state"] for experience in validation_batch])
+        current_qs_list = self.model.predict(current_states)
+        new_current_states = np.array([experience["next_state"] for experience in validation_batch])
+        future_qs_list = self.model.predict(new_current_states)
 
-        self.n_model.summary()
-        self.n_model.compile(
-            optimizer=tf.optimizers.Adam(),
-            loss=tf.keras.losses.MeanSquaredError(),
-            metrics=[tf.keras.metrics.Accuracy()]
-        )
+        X_val = []
+        Y_val = []
+        for index, experience in enumerate(validation_batch):
+            max_future_q = experience["reward"] + discount_factor * np.max(future_qs_list[index])
 
-    def train(self,inputs,targets):
-        preds = tf.reduce_sum(qvalues * actions_one_hot, axis=1)
-        self.n_model.fit(
-            inputs,
-            preds,
-            batch_size = 32,
-            epochs=10
-        )
+            current_qs = current_qs_list[index]
+            current_qs[experience["action"]] = (1 - learning_rate) * current_qs[
+                experience["action"]] + learning_rate * max_future_q
+
+            X_val.append(experience["state"])
+            Y_val.append(current_qs)
+
+        checkpoint_path = "training_1/cp.ckpt"
+
+        # Create a callback that saves the model's weights
+        cp_callback = tf.keras.callbacks.ModelCheckpoint(filepath=checkpoint_path,
+                                                         save_weights_only=True,
+                                                         verbose=1)
+
+
+        hist = self.model.fit(np.array(X), np.array(Y), batch_size=128, shuffle=True, epochs=10, validation_data=(np.array(X_val), np.array(Y_val)),callbacks=[cp_callback])
+
 
 
 
 class Memory(object):
     """Memory buffer for Experience Replay."""
 
-    def __init__(self, max_size):
+    def __init__(self, max_size,output_experiences):
         """Initialize a buffer containing max_size experiences."""
         self.buffer = deque(maxlen=max_size)
+        self.buffer_file = open("experiences.txt", "a")
+        self.output_experiences = output_experiences
 
     def add(self, experience):
         """Add an experience to the buffer."""
         self.buffer.append(experience)
+        state_list = list()
+        if self.output_experiences:
+            for transmission in experience["state"]:
+                state_list.append(transmission.tolist())
+            next_state_list = list()
+            for transmission in experience["next_state"]:
+                next_state_list.append(transmission.tolist())
+            self.buffer_file.write(json.dumps({"state":state_list,"reward":experience["reward"],"action":experience["action"],"next_state":next_state_list}))
+            self.buffer_file.write("\n")
 
     def sample(self, batch_size):
         """Sample a batch of experiences from the buffer."""
@@ -149,20 +157,21 @@ class Agent(object):
     """Deep Q-learning agent."""
 
     def __init__(self,
-                 state_space_size,
+                 time_Steps,
+                 feature_size,
                  action_space_size,
                  discount=0.99,
-                 batch_size=32,
+                 batch_size=128,
                  max_explore=1,
                  min_explore=0.05,
-                 anneal_rate=(1 / 100),
+                 anneal_rate=(1 / 400),
                  replay_memory_size=100000,
-                 replay_start_size=50):
+                 replay_start_size=50,output_experiences = False):
         """Set parameters, initialize network."""
         self.action_space_size = action_space_size
 
-        self.learning_model = Network(state_space_size, action_space_size)
-        self.learning_model.newModel()
+        self.learning_model = Network(time_Steps, feature_size, action_space_size)
+
 
         # training parameters
         self.discount = discount
@@ -175,7 +184,7 @@ class Agent(object):
         self.steps = 0
 
         # replay memory
-        self.memory = Memory(replay_memory_size)
+        self.memory = Memory(replay_memory_size,output_experiences)
         self.replay_start_size = replay_start_size
 
 
@@ -208,10 +217,8 @@ class Agent(object):
                 self.memory.add(experience)
             else:
                 self.steps -= 1
-
-            if self.steps > self.replay_start_size:
+            if self.steps > 0 and ((self.steps % (self.batch_size + int(self.batch_size/2))) == 0):
                 self.train_network()
-                self.validate_network()
 
         self.last_states[mote] = state
         self.last_actions[mote] = action
@@ -238,28 +245,6 @@ class Agent(object):
     def train_network(self):
         """Update online network weights."""
         batch = self.memory.sample(self.batch_size)
-        inputs = np.array([b["state"] for b in batch],dtype=np.float64)
-        actions = np.array([b["action"] for b in batch],dtype=int)
-        rewards = np.array([b["reward"] for b in batch],dtype=np.float64)
-        next_inputs = np.array([b["next_state"] for b in batch],dtype=np.float64)
+        validation_batch = self.memory.sample(int(self.batch_size/2))
+        self.learning_model.train_step(batch, validation_batch)
 
-        actions_one_hot = np.eye(self.action_space_size)[actions]
-
-        next_qvalues = np.squeeze(self.learning_model.model(next_inputs))
-        targets = rewards + self.discount * np.amax(next_qvalues, axis=-1)
-        self.learning_model.train(inputs,targets)
-        #self.learning_model.train_step(inputs, targets, actions_one_hot)
-
-    def validate_network(self):
-        """validate network on experience batch"""
-        batch = self.memory.sample(self.batch_size)
-        inputs = np.array([b["state"] for b in batch], dtype=np.float64)
-        actions = np.array([b["action"] for b in batch], dtype=int)
-        rewards = np.array([b["reward"] for b in batch], dtype=np.float64)
-        next_inputs = np.array([b["next_state"] for b in batch], dtype=np.float64)
-
-        actions_one_hot = np.eye(self.action_space_size)[actions]
-
-        targets = rewards
-
-        self.learning_model.validate_step(inputs, targets, actions_one_hot)

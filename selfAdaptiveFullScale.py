@@ -191,14 +191,18 @@ class Analyser:
                 state = self.knowledge.get_last_state_vector(mote)
 
                 for transmission in state:
+                    feature_vector = list()
                     if transmission.get("transmission_power_setting") != -1000:
                         self.gateway = transmission.get("receiver")
                     for value in list(transmission.values()):
-                        state_vector.append(value)
+                        feature_vector.append(value)
+                    feature_vector = np.array(feature_vector, dtype=np.float64)
+                    state_vector.append(feature_vector)
+                    print(np.shape(state))
 
                 reward += self.knowledge.goal_model.evaluate(state)
             reward = reward/self.knowledge.number_of_motes
-            state_vector = np.array(state_vector, dtype=np.float64)
+            #state_vector = np.array(state_vector, dtype=np.float64)
             if self.knowledge.getKnowledgeManager() is not None:
                 self.knowledge.getKnowledgeManager().observe_state(mote,state,reward)
 
@@ -232,7 +236,7 @@ class DecisionMaking:
         index = 0
         self.clustering = dict()
         while index < len(models):
-            self.agents.append(Q_learner_model.Agent(self.knowledge.number_of_datapoints_per_state * self.knowledge.number_of_features, self.knowledge.number_of_actions))
+            self.agents.append(Q_learner_model.Agent(self.knowledge.number_of_datapoints_per_state,self.knowledge.number_of_features, self.knowledge.number_of_actions))
             self.agents[len(self.agents)-1].learning_model = models[index]
             self.agents[len(self.agents) - 1].memory = memories[index]
             self.agents[len(self.agents)-1].handle_episode_start()

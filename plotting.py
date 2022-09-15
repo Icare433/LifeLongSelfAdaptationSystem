@@ -204,7 +204,8 @@ def readData(resultsfileName):
 
 def readDataJava(resultsfileName):
     data = {"cycle": [dict()], "packet_loss": [dict()], "energy_consumption": [dict()],
-            "freshness": [dict()], "utility": [dict()], "cluster": [dict()], "transmission_interval":[dict()], "received_transmission_interval":[dict()]}
+            "freshness": [dict()], "availability": [dict()], "utility": [dict()], "cluster": [dict()],
+            "transmission_interval": [dict()], "received_transmission_interval": [dict()]}
     results_file = open(resultsfileName, "r")
     cycle = [dict()]
     cluster = 0
@@ -267,7 +268,7 @@ def readDataJava(resultsfileName):
 
         if counter.get(mote) > 0:
 
-            features = {"packet_loss": 0, "energy_consumption": 0, "freshness": 0, "utility": [0, 0, 0, 0], "transmission_interval": 0, "received_transmission_interval":0}
+            features = {"availability":0,"packet_loss": 0, "energy_consumption": 0, "freshness": 0, "utility": [0, 0, 0, 0], "transmission_interval": 0, "received_transmission_interval":0}
             if cycle[cluster].get(mote) is None:
                 data["cycle"][cluster][mote] = list()
                 for feature in features:
@@ -290,20 +291,19 @@ def readDataJava(resultsfileName):
                         features["utility"][0] += 1 - max(0, (
                                         departure_time_seconds - last_transmitted - 100)) \
                                                      / (departure_time_seconds - last_transmitted + 1)
+                        features["availability"] += departure_time_seconds - last_transmitted
                     features["transmission_interval"] = transmission.get("transmission_interval")
                     last_transmitted = departure_time_seconds
 
-                    features["energy_consumption"] = math.pow(10, (
-                                int(transmission["transmission_power_setting"]) - 30) / 10)
+                    features["energy_consumption"] = int(transmission["transmission_power_setting"])
 
                     transmission["expiration_time"] = transmission["expiration_time"]
 
                     features["freshness"] = features.get("freshness") + transmission["latency"] * transmission.get(
                             "expiration_time") / 100
                     features["utility"][1] = features["utility"][1] + 1 - max(0, (
-                                transmission.get("latency") * transmission.get("expiration_time") / 100 - 60)) / (
-                                                         transmission.get("latency") * transmission.get(
-                                                     "expiration_time") / 100 + 1)
+                        (255-transmission.get("latency") if transmission.get("latency") < 0 else transmission.get("latency")) * transmission.get("expiration_time") / 100 - 60)) / (
+                                                         (255-transmission.get("latency") if transmission.get("latency")< 0 else transmission.get("latency")) * transmission.get("expiration_time") / 100 + 1)
                     features["utility"][3] += 1 - math.pow(transmission.get("transmission_power_setting")/14.0,2)
 
 
@@ -1199,13 +1199,13 @@ data_switch = readData("results_paper_recluster_better.txt")
 data_no_switch = readData("results_for_action.txt")
 data_no = list()
 #data_no.append(readData("results_no_0.txt"))
-data_no.append(readDataJava("moteData_dynamic gaussian.txt"))
+data_no.append(readDataJava("moteData_new_learner.txt"))
 
 data_nothing = list()
 data_nothing.append(readDataJava("moteData_single.txt"))
 #data_nothing.append(readData("results_nothing_maybe.txt"))
 data_run = list()
-data_run.append(readDataJava("moteData_dynamic gaussian.txt"))
+data_run.append(readDataJava("moteData.txt"))
 data_global =list()
 data_global.append(readDataGlobal("results_new_utility_seed.txt"))
 data_no_switch_global =list()
@@ -1216,7 +1216,7 @@ data_power_setting = readDataPowerSetting("results_run_2.txt")
 #print(stats.spearmanr(data_power_setting["power_setting"],data_power_setting["transmission_interval"]))
 
 utility =list()
-boxplot_data = {"utility":list(), "mote":list(), "period": list(), "run":list()}
+boxplot_data = {"energy":list(),"packet_loss":list(),"freshness":list(),"availability":list(),"utility":list(), "mote":list(), "period": list(), "run":list()}
 motes =list()
 cluster = list()
 packet_loss = list()
@@ -1225,6 +1225,10 @@ iqr= list()
 medians = list()
 cluster_0_size = list()
 mote_utility = dict()
+mote_packet_loss = dict()
+mote_freshness = dict()
+mote_availability = dict()
+mote_energy = dict()
 for data in data_run:
     packet_loss.append(list())
     freshness.append(list())
@@ -1237,6 +1241,10 @@ for data in data_run:
 
         for mote in mote_utility:
             mote_utility[mote] = list()
+            mote_packet_loss[mote] = list()
+            mote_freshness[mote] = list()
+            mote_availability[mote] = list()
+            mote_energy[mote] = list()
 
         if period > 0:
 
@@ -1260,10 +1268,18 @@ for data in data_run:
                 #    cluster_0_size[-1]["size"][-1] += 1
                 if mote not in mote_utility:
                     mote_utility[mote] = list()
+                    mote_packet_loss[mote] = list()
+                    mote_freshness[mote] = list()
+                    mote_availability[mote] = list()
+                    mote_energy[mote] = list()
                 for transmission in range(len(data["utility"][period][mote])):
                     packet_loss_period.append(data["packet_loss"][period][mote][transmission])
                     freshness_period.append(data["freshness"][period][mote][transmission])
                     mote_utility[mote].append(data["utility"][period][mote][transmission])
+                    mote_packet_loss[mote].append(data["packet_loss"][period][mote][transmission])
+                    mote_freshness[mote].append(data["freshness"][period][mote][transmission])
+                    mote_availability[mote].append(data["availability"][period][mote][transmission])
+                    mote_energy[mote].append(data["energy_consumption"][period][mote][transmission])
                     utility_0.append(data["received_transmission_interval"][period][mote][transmission])
 
             utility.append(np.mean(utility_0))
@@ -1286,9 +1302,13 @@ for data in data_run:
             cluster.append(1)
 
             for mote in mote_utility:
-                for cycle_data in mote_utility[mote]:
+                for cycle in range (len(mote_utility[mote])):
                     data_utility.append(np.mean(mote_utility[mote]))
-                    boxplot_data["utility"].append(cycle_data)
+                    boxplot_data["utility"].append(mote_utility[mote][cycle])
+                    boxplot_data["energy"].append(mote_energy[mote][cycle])
+                    boxplot_data["packet_loss"].append(mote_packet_loss[mote][cycle])
+                    boxplot_data["freshness"].append(mote_freshness[mote][cycle])
+                    boxplot_data["availability"].append(mote_availability[mote][cycle])
                     boxplot_data["period"].append(period)
                     boxplot_data["mote"].append(mote)
                     boxplot_data["run"].append("dynamic")
@@ -1296,22 +1316,29 @@ for data in data_run:
             for mote in data["utility"][period]:
                 if mote not in mote_utility:
                     mote_utility[mote] = list()
+                    mote_packet_loss[mote] = list()
+                    mote_freshness[mote] = list()
+                    mote_availability[mote] = list()
+                    mote_energy[mote] = list()
 
 
     #percentiles = np.percentile(data_utility, [75, 25])
     #iqr.append(percentiles[0] - percentiles[1])
     medians.append(np.median(data_utility))
+
 print( "dynamic: median: " + str(np.mean(medians)) + " IQR " + str(np.mean(iqr)))
-fig = px.bar(cluster_0_size[0], x='period', y='size')
-fig.show()
+#fig = px.bar(cluster_0_size[0], x='period', y='size')
+#fig.show()
 
 
-fig = px.bar(cluster_0_size[0], x='period', y='transmission_interval', color="cluster",barmode='group')
-fig.show()
+#fig = px.bar(cluster_0_size[0], x='period', y='transmission_interval', color="cluster",barmode='group')
+#fig.show()
 
 lastmote = 1
 mote_names = dict()
 new_motes_list = list()
+
+print(len(set(boxplot_data["mote"])))
 for entry in boxplot_data["mote"]:
     if mote_names.get(entry) is None:
         mote_names[entry] = lastmote
@@ -1320,6 +1347,18 @@ for entry in boxplot_data["mote"]:
 boxplot_data["mote"] = new_motes_list
 
 fig = px.box(boxplot_data, x="mote", y="utility")
+fig.show()
+
+fig = px.box(boxplot_data, x="mote", y="packet_loss")
+fig.show()
+
+fig = px.box(boxplot_data, x="mote", y="energy")
+fig.show()
+
+fig = px.box(boxplot_data, x="mote", y="availability")
+fig.show()
+
+fig = px.box(boxplot_data, x="mote", y="freshness")
 fig.show()
 
 utility_no =list()
@@ -1352,6 +1391,7 @@ for data in data_no:
             for mote in data["utility"][period]:
                 if mote not in mote_utility:
                     mote_utility[mote] = list()
+
                 for cycle in range(len(data["utility"][period][mote])):
                     packet_loss_period.append(data["packet_loss"][period][mote][cycle])
                     freshness_period.append(data["freshness"][period][mote][cycle])
@@ -1505,7 +1545,7 @@ plotDensity(data_power_setting)
 #plotAll([data_no_switch], name = "information")
 plotAll(data_no,data_run, name = "comparision")
 
-plotAll(data_no_switch_global, data_global, name ="global_comparison")
+#plotAll(data_no_switch_global, data_global, name ="global_comparison")
 #plotAll(data_power_setting, name="power_setting")
 # plotAll(data_three,cycle_three,"three")
 # plotAllBox(data_two, "two")

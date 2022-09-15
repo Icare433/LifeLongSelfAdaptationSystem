@@ -70,7 +70,7 @@ def get_data(message):
     return data
 
 
-def create_lost_data(number,transmission_interval,departure_time):
+def create_lost_data(number, transmission_interval, departure_time):
         lost_data = dict()
         lost_data["transmission_interval"] = transmission_interval
         lost_data["expiration_time"] = -1000
@@ -85,7 +85,7 @@ def create_lost_data(number,transmission_interval,departure_time):
 
 class Knowledge:
 
-    def __init__(self,goal_model,number_of_datapoints_per_state = 10, number_of_features = 8, number_of_actions = 15, knowledgeManager = None):
+    def __init__(self, goal_model, number_of_datapoints_per_state = 15, number_of_features = 8, number_of_actions = 15, knowledgeManager = None):
         self.number_of_datapoints_per_state = number_of_datapoints_per_state
         self.number_of_features = number_of_features
         self.number_of_actions = number_of_actions
@@ -179,11 +179,14 @@ class Analyser:
             state = self.knowledge.get_last_state_vector(mote)
             state_vector = list()
             for transmission in state:
+                feature_vector = list()
                 if transmission.get("transmission_power_setting") != -1000:
                     self.gateway = transmission.get("receiver")
                 for value in list(transmission.values()):
-                    state_vector.append(value)
-            state_vector = np.array(state_vector, dtype=np.float64)
+                    feature_vector.append(value)
+                feature_vector = np.array(feature_vector, dtype=np.float64)
+                state_vector.append(feature_vector)
+            # state_vector = np.array(state_vector, dtype=np.float64)
             reward = self.knowledge.goal_model.evaluate(state)
             if self.knowledge.getKnowledgeManager() is not None:
                 self.knowledge.getKnowledgeManager().observe_state(mote,state,reward)
@@ -202,7 +205,7 @@ class DecisionMaking:
 
 
         for n in range(nb_agents):
-            self.agents.append(Q_learner_model.Agent(self.knowledge.number_of_datapoints_per_state * self.knowledge.number_of_features, self.knowledge.number_of_actions))
+            self.agents.append(Q_learner_model.Agent(self.knowledge.number_of_datapoints_per_state, self.knowledge.number_of_features, self.knowledge.number_of_actions,True))
             self.agents[n].handle_episode_start()
 
 
@@ -244,7 +247,7 @@ class Monitor:
         self.knowledge = knowledge
         self.analyser = analyser
         self.queue = queue
-        self.timefile= open("times.txt","a")
+
 
     def monitor(self):
 
@@ -285,6 +288,7 @@ class Planner:
         self.executer = executer
 
     def plan(self, mote, action_number):
+        print("made a choice " + str(mote))
         if action_number != 0:
             action = self.actionTable.get(action_number)
             self.executer.execute_change(mote, action[0], action[1], action[2])
@@ -295,7 +299,6 @@ class Executor:
         self.mqtt_client = mqtt_client
 
     def execute_change(self,moteid,transmission_power,expiration_time,transmission_interval):
-        print("made a choice " + str(moteid))
         self.mqtt_client.send(("node/"+str(moteid)+"/application/1/tx"+"|"+'{"data":['+str(transmission_power)+','+str(expiration_time)+','+str(transmission_interval)+'],"macCommands":[]}'+"\n").encode('utf-8'))
 
 
@@ -304,6 +307,7 @@ class LatencyGoal:
 
     def __init__(self, value):
         self.value = value
+        self.rewardfile = open("rewards.txt", "a")
 
     def evaluate(self, state):
         satisfaction = 0
@@ -317,6 +321,7 @@ class LatencyGoal:
             satisfaction = satisfaction / counter
         else:
             satisfaction = 0
+
         return satisfaction
 
 
@@ -324,6 +329,7 @@ class AvailabiltyGoal:
 
     def __init__(self, value):
         self.value = value
+        self.rewardfile = open("rewards.txt", "a")
 
     def evaluate(self, state):
         satisfaction = 0
@@ -341,6 +347,7 @@ class AvailabiltyGoal:
             satisfaction = satisfaction / counter
         else:
             satisfaction = 0
+
         return satisfaction
 
 
@@ -348,6 +355,7 @@ class PacketlossGoal:
 
     def __init__(self,value):
         self.value = value
+        self.rewardfile = open("rewards.txt", "a")
 
     def evaluate(self,state):
         satisfaction = 0.0
@@ -360,6 +368,9 @@ class PacketlossGoal:
         return satisfaction
 
 class EnergyconsumptionGoal:
+
+    def __init__(self):
+        self.rewardfile = open("rewards.txt", "a")
 
     def evaluate(self,state):
         satisfaction = 0.0
@@ -381,10 +392,12 @@ class ListGoalModel:
         self.goals = goals
         self.weights = weights
 
+
     def evaluate(self,state):
         reward = 0.0
         for goal in range(len(self.goals)):
-            reward +=self.goals[goal].evaluate(state)*self.weights[goal]
+            satisfaction = self.goals[goal].evaluate(state)
+            reward +=satisfaction*self.weights[goal]
         return reward
 
 
